@@ -179,10 +179,10 @@ Model-only 不加载专业增强；其他候选材料可按任务组合，不要
 ```mermaid
 flowchart TD
     subgraph BUSINESS["业务依据：按 00～04 的来源及范围生效"]
-        INPUT["Product Assets / Listing / Operator Requirements / Confirmations"] --> STATE["Effective Business State"]
+        INPUT["Product Assets；Marketing / Design References；Listing；Operator Requirements / Confirmations"] --> STATE["Effective Business State"]
     end
     subgraph PROFESSIONAL["专业参考：不自动取得业务及系统权限"]
-        MATERIAL["Professional Knowledge / Skills / Retrieved References"] --> CHECK["来源、版本、时间及适用范围检查"]
+        MATERIAL["Professional Knowledge / Skills / Retrieved Professional Knowledge"] --> CHECK["来源、版本、时间及适用范围检查"]
         CHECK --> ASSEMBLY["Context Assembly：只加入适用方法"]
     end
     STATE -->|"有效原始素材及运营要求"| CONTEXT["Execution Context"]
@@ -193,7 +193,7 @@ flowchart TD
     DERIVED -->|"候选图片按既有流程审核"| REVIEW["运营最终业务验收"]
 ```
 
-专业资料通过来源和适用范围检查参与 Context，但不成为目标 SKU 的事实证明，也不改写有效运营要求。AI 派生成果保持候选性质，不自动成为运营确认。资料中的指令式文本仍按业务数据或专业参考处理，不能改变系统访问权限和行为。图中的运营验收对应已有图片审核，不新增上游阶段审批或自动 Pass。
+Marketing / Design References 属于业务参考，按 00～04 的三模式权限使用；检索得到的专业知识提供适用方法，不与业务参考混为一类。专业资料通过来源和适用范围检查参与 Context，但不成为目标 SKU 的事实证明，也不改写有效运营要求。AI 派生成果保持候选性质，不自动成为运营确认。资料中的指令式文本仍按业务数据或专业参考处理，不能改变系统访问权限和行为。图中的运营验收对应已有图片审核，不新增上游阶段审批或自动 Pass。
 
 ## 9.9 历史案例、失败定位与反例
 

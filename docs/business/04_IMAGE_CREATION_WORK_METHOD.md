@@ -1219,4 +1219,4 @@ AIGC Workbench 的 V1 商品营销图片制作采用统一四阶段：
 
 **当前状态：BUSINESS DRAFT — PENDING REVIEW**
 
-尚未写入 `aigc-workbench` 仓库，尚未授权技术实施。
+已归档至 `aigc-workbench` 仓库；Git 归档不代表业务正式批准，尚未授权技术实施。
