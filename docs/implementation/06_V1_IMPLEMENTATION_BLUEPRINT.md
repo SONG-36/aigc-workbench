@@ -12,7 +12,7 @@
 - [05 技术架构总入口](../business/05_TECHNICAL_ARCHITECTURE.md)及其 T01～T09 专题：技术架构研究及候选原则。
 - `06`：V1 的工程实施方向、决策、边界和开发路线。
 - [I01](./I01_FRONTEND_WORKBENCH.md)、[I02](./I02_ENGINEERING_BOUNDARIES.md)：具体实施设计草稿。
-- `I03_DELIVERY_PLAN.md`：计划中的交付文档，尚待制定。
+- [I03_DELIVERY_PLAN.md](./I03_DELIVERY_PLAN.md)：已形成 V0.1 交付计划草稿，待审核、未实施。
 
 不在本文件重复九个技术研究专题的完整内容。
 
@@ -78,6 +78,7 @@ flowchart TD
 6. **代码职责明确。** 不继承旧仓跨脚本全局状态和混杂业务逻辑。
 7. **按纵向切片开发。** 不提前创建九套技术服务或大量空模块。
 8. **运营最终审核。** 模型成功、工具成功和业务 Pass 必须区分。
+9. **继承旧工作台产品设计。** V1 前端以旧仓有效工作台 UI 设计为优先继承基线；工程实现可重构，但不得无业务依据重新设计操作流程。具体来源、调整边界及待完成的 UI 检查见 [I01](./I01_FRONTEND_WORKBENCH.md#legacy-ui-baseline)。
 
 ## 6. 实施文档分工
 
@@ -85,7 +86,7 @@ flowchart TD
 |---|---|
 | [I01_FRONTEND_WORKBENCH.md](./I01_FRONTEND_WORKBENCH.md) | 运营交互、组件和前端状态 |
 | [I02_ENGINEERING_BOUNDARIES.md](./I02_ENGINEERING_BOUNDARIES.md) | 后端模块、数据流、接口边界与工程质量 |
-| I03_DELIVERY_PLAN.md（尚待制定） | 纵向开发切片、验收、测试与交付进度 |
+| [I03_DELIVERY_PLAN.md](./I03_DELIVERY_PLAN.md)（V0.1 草稿，待审核、未实施） | 纵向开发切片、验收、测试与交付进度 |
 
 具体细节以对应专题文件为唯一实施说明来源，06 不维护第二份完整副本。
 
@@ -99,7 +100,7 @@ flowchart TD
 
 后续逐步加入参考理解、单图制作决定、真实图片生成、修改与 Pass，再扩展 Quick-B、Listing 和多图。
 
-具体开发顺序及验收由尚待制定的 I03 确定。
+具体开发顺序及验收见 [I03 交付计划草稿](./I03_DELIVERY_PLAN.md)，不表示各切片已经批准或开始实施。
 
 ## 8. 当前不实施
 
@@ -127,6 +128,6 @@ flowchart TD
 **版本记录**
 
 - V0.1：此前完整实施蓝图草稿。
-- V0.2：精简为实施总入口，I01、I02 形成独立设计草稿；I03 尚待制定。技术选型和实施方案仍待业务负责人审核。
+- V0.2：精简为实施总入口，I01、I02 形成独立设计草稿；本次补充 UI 继承原则及 I03 V0.1 交付计划草稿导航。技术选型和实施方案仍待业务负责人审核，尚未实施。
 
 **当前状态：REVIEW PENDING / NOT IMPLEMENTED**
