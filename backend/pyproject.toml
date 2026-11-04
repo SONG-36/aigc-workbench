@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aigc-workbench"
 version = "0.1.0"
-description = "F01 local application foundation; no AI execution"
+description = "S01 Quick-A assets and slots; no AI execution"
 requires-python = ">=3.12"
-dependencies = ["fastapi>=0.120,<1", "uvicorn>=0.35,<1"]
+dependencies = ["fastapi>=0.120,<1", "uvicorn>=0.35,<1", "Pillow>=13,<14"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "httpx2>=2.16,<3"]

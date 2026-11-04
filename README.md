@@ -1,16 +1,17 @@
 # AIGC Workbench
 
-F01 工程基础：React 工作台 Shell + FastAPI 模块化单体 + SQLite。
-当前仅实现 **Quick-A Task 草稿创建、列表、查询与恢复**，不具备图片制作条件。
+React 工作台 + FastAPI 模块化单体 + SQLite / 本地原始素材文件。
+当前完成 Quick-A Task 的创建、真实商品/营销参考上传、最小图位配置及恢复。
 
-- **F01-A ENGINEERING VERIFIED**：范围限于下述工程链路与已执行检查。
-- **F01-B UI BASELINE PENDING**：已核实区域的 Shell 已实现并通过桌面浏览器查看；旧仓带数据候选、历史版本、修改草稿、Pass / Reject 和 Inspector 的完整视觉基线仍未完成。
-- 没有真实 AI、图片生成、素材上传、完整图位或审核功能；没有开始 S01。
-- 业务与技术设计依据仍位于 [docs/business](docs/business/) 和 [docs/implementation](docs/implementation/)，本轮没有重写这些文档。
+- **S01-A ENGINEERING VERIFIED**：Task 演进、V1→V2、Asset/Slot、幂等写入与 R01～R04。
+- **S01-B ENGINEERING VERIFIED**：范围限于本轮实际接通并在桌面浏览器验证的素材上传、图位参考绑定、保存/刷新/重新打开/进程重启恢复。
+- 这不是 BUSINESS ACCEPTED；完整旧 UI、带数据候选、历史版本、修改、Pass / Reject、Inspector 仍未完整视觉验收。
+- 不支持 AI 理解、生图、图片修改、审核或完整三模式；没有开始 S02。
+- [业务/架构依据](docs/business/)和[实施文档](docs/implementation/)未在本轮重写。
 
 ## 安装与启动
 
-需要 Python 3.12+、Node.js 20.19+ 或 22.12+。本轮使用 Python 3.12.13、Node 26.4.0、npm 11.17.0。
+需要 Python 3.12+、Node.js 20.19+ 或 22.12+。本机验证使用 Python 3.12.13、Node 26.4.0、npm 11.17.0。
 
 在仓库根目录安装：
 
@@ -21,89 +22,121 @@ backend/.venv/bin/python -m pip install --no-deps -e backend
 npm --prefix frontend ci
 ```
 
-后端终端，在仓库根目录：
+两个终端分别运行：
 
 ```bash
 backend/.venv/bin/python -m uvicorn aigc_workbench.app:create_app --factory --host 127.0.0.1 --port 8022
 ```
 
-另一个终端，在仓库根目录：
-
 ```bash
 npm --prefix frontend run dev
 ```
 
-打开 `http://127.0.0.1:8021/`；后端健康检查为 `http://127.0.0.1:8022/api/health`，接口文档为 `http://127.0.0.1:8022/docs`。前端通过同源 `/api` 访问 Vite 的本机后端代理。
-本轮检查时 8020 已由其他进程占用，故使用 8022，未停止原进程或旧仓服务。端口被占用时先核对进程，不自动终止其他服务。
+工作台：`http://127.0.0.1:8021/`；健康检查：`http://127.0.0.1:8022/api/health`；API 文档：`http://127.0.0.1:8022/docs`。
+前端通过同源 `/api` 代理访问本机后端。8020 原有进程未动；端口占用时先核对，不停止其他服务。
+Ctrl+C 分别停止本轮前后端。Python 修改后显式重启；不使用自动重载。
+生产构建检查用 `npm --prefix frontend run build`；停止 dev 后可用 `npm --prefix frontend run preview` 本地检查构建产物，不代表生产部署。
 
-Ctrl+C 分别停止本轮启动的前后端。后端不使用自动重载；修改 Python 后显式重启。生产构建检查使用 `npm --prefix frontend run build`；停止 dev 后可用 `npm --prefix frontend run preview` 本地查看构建产物，不能将此视为生产部署。
+## 配置及运行数据
 
-## 配置和数据
-
-[.env.example](.env.example) 只有可提交的示例值，不含凭据。后端读取进程环境，不自动加载环境文件：
+[.env.example](.env.example) 只有示例，不含凭据。后端读取进程环境，不自动加载环境文件。
 
 | 配置 | 默认值 / 用途 |
 |---|---|
-| `AIGC_DATA_DIR` | `.runtime/f01`；相对路径从仓库根目录解析 |
-| `AIGC_ALLOWED_ORIGINS` | 本机前端 8021 的 Origin；逗号分隔 |
-| `AIGC_API_TARGET` | `http://127.0.0.1:8022`；Vite 服务端代理目标 |
+| `AIGC_DATA_DIR` | `.runtime/f01`，相对仓库根目录解析；沿用 F01 数据目录 |
+| `AIGC_ALLOWED_ORIGINS` | 本机 8021 的 Origin，逗号分隔 |
+| `AIGC_API_TARGET` | `http://127.0.0.1:8022`，Vite 服务端代理 |
 
-数据库为 `.runtime/f01/workbench.sqlite3`，运行数据、虚拟环境、依赖、构建产物、缓存和本地环境文件均被 Git 忽略。本轮没有商业素材文件；素材文件存储留待 S01 实际需要时实现，不创建空 Asset 存储模块。
+目录内包含 `workbench.sqlite3`、`staging/<UUID>.part`、`assets/<UUID>`。
+数据库、原始商业素材、备份、验证记录、环境文件、虚拟环境、依赖、缓存及构建产物不纳入 Git。
+没有模型客户端，不需要任何模型凭据，不得将密钥放入 `VITE_*`。
 
-这是仅绑定回环地址的开发环境：写请求检查 Origin，拒绝非本机 Host，但**未实现多用户身份认证及资源授权**，不能直接用于运营 Pilot 或公网服务。模型凭据完全不需要，不得放入前端 `VITE_*` 变量；当前没有模型客户端或付费入口。
+服务只绑定回环地址，校验 Host 和写请求 Origin。没有跨域 CORS 开放，也没有多用户认证或资源授权，不能直接用于运营 Pilot 或公网服务。
+Task/Asset/Slot 的资源归属在服务器校验；这不等同于用户身份认证。
 
-## 本轮草稿契约
+## 当前业务范围和状态
 
-本次任务明确选择“尚不具备制作条件的 Quick-A Task 草稿”。[T01](docs/business/architecture/T01_SYSTEM_BOUNDARY.md) 将 Task 视为业务容器，[I02](docs/implementation/I02_ENGINEERING_BOUNDARIES.md) 分开定义 CreateTask、SaveAssets 和 StartCreation；未发现禁止在准备阶段先保存标识的条款。
+Task 是同一个业务身份：Domain 从受限 `TaskDraft` 演进为 `Task`，旧名称仅为同一类的兼容别名。
+保留 `task_drafts` 表及所有旧 UUID、名称、模式、状态和时间，不复制“正式 Task”。
 
-因此只保存任务 ID、名称、Quick-A 模式、草稿状态和创建时间。名称 1～120 字符是本接口的标识校验，不是新增营销规则。Domain 固定返回 `status=draft`、`can_generate=false`；商品图和营销参考仍是制作输入前提，不能用此草稿绕过 [01](docs/business/01_BUSINESS_MODES.md) / [04](docs/business/04_IMAGE_CREATION_WORK_METHOD.md)。请求不得自行指定模式、就绪状态或生成权限。
+Quick-A 继续采用实际商品图及同款同配置营销参考，不要求 Listing；业务权限以 [01](docs/business/01_BUSINESS_MODES.md)、[02](docs/business/02_INTENT_AND_CONTEXT_RULES.md)、[04](docs/business/04_IMAGE_CREATION_WORK_METHOD.md) 为准。
+本轮只保存准备资料，不认证商品事实、营销宣称或参考适用性。
 
-| 实际接口 | 用途 |
+`status=draft` 不因上传而变成制作完成。每个 Slot 的 `inputs_ready` 由服务器根据该 Task 的商品素材和已保存营销参考绑定派生。
+`materials_ready` 表示至少一个独立图位基础图片输入齐备，不表示所有图位齐备；未绑定图位不阻断其他图位。
+`can_generate` 始终为 false，图片执行尚未实现，与素材准备状态分开。
+
+支持主图、对比图、卖点图、使用场景图的最小创建、参考替换/解除绑定、输出尺寸及逐图要求保存。
+主图和对比图各最多一个，动态类型可多次创建；排序不是身份。
+尺寸图专用素材/确认流程、图位删除、素材删除、整体要求、完整 Quick-B/Listing 留待后续，界面明确未接通。
+
+## API 和安全重试
+
+| 接口 | 用途 |
 |---|---|
-| `GET /api/health` | 应用启动健康状态 |
-| `POST /api/tasks` | JSON `{"title":"任务名称"}`，返回 201 和稳定 UUID |
-| `GET /api/tasks` | 查询已保存草稿 |
-| `GET /api/tasks/{uuid}` | 恢复具体草稿 |
+| `GET /api/health` | 应用健康检查 |
+| `POST /api/tasks` | JSON `{title, operation_id}`，返回 Task |
+| `GET /api/tasks` / `GET /api/tasks/{id}` | 列表/完整恢复 |
+| `POST /api/tasks/{id}/assets` | 原始文件 body；Query 为 role、operation_id、filename |
+| `GET /api/tasks/{id}/assets/{asset_id}/content` | 归属及 SHA-256 校验后读取 |
+| `POST /api/tasks/{id}/slots` | JSON `{kind, operation_id}` |
+| `PUT /api/tasks/{id}/slots/{slot_id}` | 显式保存 reference_asset_id、output_size、requirements |
 
-没有 generate / review / upload / AI 接口。错误统一使用 `{"error":{"code":"...","message":"..."}}`；无效请求 422、不存在草稿 404、来源拒绝 403、存储不可用 503、未预期错误 500。前端不会把请求失败显示为保存成功。
+创建/上传/图位创建使用客户端 UUID 操作身份，同一操作在数据库事务中串行检查并复用原结果；同键不同内容返回 409。
+任务名和文件哈希不是去重身份；同名任务、同文件的独立上传操作允许拥有独立身份。
+参考配置 PUT 是显式幂等赋值，不创建新 Slot，也不覆盖原文件。
 
-## 工程职责及真实调用路径
+前端区分明确拒绝和结果未知；网络中断、无法解析成功响应或 5xx 不表示服务器撤销。
+“安全重试”复用同一操作身份和原内容，不自动重试。
+Task 创建的未确认意图保存在 sessionStorage，刷新后只恢复意图，不自动 POST，也不把它当作已保存 Task；浏览器禁用该存储时仅保证当前页面内复用。
+上传 File/操作身份保留在当前页面，离开后先查询已保存素材，不自动重传。
 
-| 位置 | 已实现责任 |
+错误格式：`{error:{code,message}}`；非法输入 422、体积超限 413、冲突 409、资源不存在 404、来源拒绝 403、存储故障 503、其他内部错误 500。
+没有 generate / review / context / AI 执行接口。
+
+## SQLite 升级及文件一致性
+
+启动时显式初始化/迁移：空库建立初始结构，再升级到 V2；V1 仅新增 task_creations、assets、image_slots 及约束，不重建原任务表。
+迁移在单一事务中进行，成功才升级 user_version；未知版本拒绝，异常回滚。每次运行期连接启用外键，且使用 `mode=rw`，缺库读取不会隐式建库。
+后续 Schema 变更继续采用顺序迁移、备份和旧数据保留测试；禁止删除数据库代替迁移。
+
+本次实际运行库在停止 F01 后备份到被忽略的 `.runtime/s01-backups/`，再启动升级；原 F01 Task 字段已逐项对照保留。
+
+文件由服务器生成 UUID 路径，原文件名仅作为元信息。单图限制 10 MiB、2500 万像素，接受静态 JPEG/PNG/WebP；
+校验实际格式、声明类型和完整解码，保存原始字节及 SHA-256，不重编码或覆盖。
+解析依据见 [Pillow Image API](https://pillow.readthedocs.io/en/stable/reference/Image.html#PIL.Image.Image.verify)。
+
+上传链路：限流读取完整请求 → 校验/暂存并 fsync → DB 写事务/归属及幂等检查 → 原子无覆盖发布文件并同步目录 → 提交 DB。
+提交前失败回滚业务记录并清理本次暂存；中断的请求不会将本地预览显示为已保存。
+发布后若提交结果不明，不删除可能已经提交的文件，不返回成功。无关联的 UUID 文件和遗留 staging 文件由 `orphan_files()` 识别，启动日志报告，保留供核查，不自动删除。
+重复上传若已有提交，会核查原文件完整性并返回原 Asset；文件缺失/损坏明确报错。
+读取路径仅由 UUID 生成，拒绝符号链接，按记录的长度和 SHA-256 校验后返回图片。
+
+## 模块职责和真实调用路径
+
+| 位置 | 责任 |
 |---|---|
-| [frontend/src/pages](frontend/src/pages/) | 任务中心、按 URL 从服务器恢复工作台 |
-| [TaskForm.tsx](frontend/src/components/TaskForm.tsx) | 本地名称、保存中 / 错误状态；只在提交时写入 |
-| [WorkspaceShell.tsx](frontend/src/components/WorkspaceShell.tsx) | INPUT / OUTPUT 布局、折叠状态、明确禁用的未实现区域 |
-| [frontend/src/api/tasks.ts](frontend/src/api/tasks.ts) | 唯一 Task HTTP 访问及响应格式检查 |
-| [api.py](backend/src/aigc_workbench/api.py) | 请求类型、响应模型、路由与依赖获取 |
-| [application.py](backend/src/aigc_workbench/application.py) | TaskService 用例；TaskStore 仅隔离实际 SQLite 外部依赖 |
-| [domain.py](backend/src/aigc_workbench/domain.py) | 草稿身份、名称规范化、不可制作不变量；只依赖标准库 |
-| [persistence.py](backend/src/aigc_workbench/persistence.py) | SQLite 初始化、事务、参数化保存与读取 |
-| [app.py](backend/src/aigc_workbench/app.py) / [config.py](backend/src/aigc_workbench/config.py) | 组装、显式启动初始化、本机访问边界、错误约定与配置 |
+| [Workspace.tsx](frontend/src/pages/Workspace.tsx) | 按 URL 加载；工作台内串行写操作、服务器快照 |
+| [AssetUploader.tsx](frontend/src/components/AssetUploader.tsx) | 待上传 File/本地预览、原始文件提交、Object URL 释放 |
+| [SlotPanel.tsx](frontend/src/components/SlotPanel.tsx) | 独立图位、参考选择、未保存配置与显式保存 |
+| [useWriteAction.ts](frontend/src/hooks/useWriteAction.ts) | 单次写入、页面代次保护、未知结果与显式重试 |
+| [api/tasks.ts](frontend/src/api/tasks.ts) | 唯一 HTTP 客户端、DTO 检查 |
+| [api.py](backend/src/aigc_workbench/api.py) | 请求/响应、上传流字节上限、线程池调用用例 |
+| [application.py](backend/src/aigc_workbench/application.py) | TaskService：创建、上传、绑定及事务/文件协调 |
+| [domain.py](backend/src/aigc_workbench/domain.py) | Task/Asset/Slot 身份、角色/归属、图位限制及输入状态 |
+| [persistence.py](backend/src/aigc_workbench/persistence.py) | SQLiteTaskStore / SQLiteChanges：迁移、快照、真实写事务 |
+| [file_storage.py](backend/src/aigc_workbench/file_storage.py) | 真实图片验证、暂存、无覆盖发布、完整性读取 |
+| [app.py](backend/src/aigc_workbench/app.py) / [config.py](backend/src/aigc_workbench/config.py) | 组装、显式初始化、配置和统一错误 |
 
-Context / Effective State / Context Assembly、AI Capabilities、Runtime 的 Run / Attempt、模型工具适配和 Execution Evidence 的责任继续以 I02 为准，**本轮未实现，不创建空包、假运行器或通用 Registry**。后续有真实调用方时才增加代码。Task 数据不是 Runtime Run，浏览器临时状态不是业务权威。
+创建：TaskForm → createQuickADraft → api.create_task → TaskService.create_draft → Task.create / 事务幂等检查 → SQLiteChanges.add_task → DTO → URL → getTask。
 
-| 调用环节 / 函数 | 输入 → 输出 | 主要副作用 |
-|---|---|---|
-| `TaskForm.submit` | 本地名称 → 创建请求 | 显式提交，显示保存中；失败保留输入 |
-| `createQuickADraft` | title → `POST /api/tasks` JSON → TaskDraft | 一次真实 HTTP 写请求，不自动重试 |
-| `api.create_task` / `CreateTaskRequest` | 校验后的请求 → TaskService | HTTP 校验与序列化，不拼 Prompt |
-| `TaskService.create_draft` | title → Domain 草稿 → 已保存对象 | 调用实际存储端口 |
-| `TaskDraft.create` | title → UUID、规范化名称、UTC 时间、不可制作草稿 | 无数据库、Web 或模型依赖 |
-| `SQLiteTaskStore.save` | 草稿 → SQLite 记录 | 参数化 INSERT，事务提交后才返回 |
-| `TaskResponse.from_task` | Domain → HTTP 201 JSON | 无业务状态更新 |
-| `TaskForm` → `navigate` → `Workspace` | 稳定 ID → `/workspace/{id}` | URL 记录恢复身份，随后 GET |
-| `getTask` → `api.get_task` → `TaskService.get_draft` → `SQLiteTaskStore.get` | UUID → 实际记录 → 页面 | 只读查询；刷新或后端重启后同一路径恢复 |
+上传：AssetUploader → uploadAsset → api.upload_asset（实际 bytes）→ TaskService.upload_asset → LocalImageFiles.stage → SQLiteChanges / Asset 角色 → publish → 提交 → TaskResponse → 工作台服务器快照。
 
-按实际功能拆分页面、用例、纯业务规则与 SQLite；没有为每个函数建立多层包装。唯一 Protocol 有真实数据库调用方，未机械创建九套专题模块。
+绑定：SlotEditor → configureSlot → api.configure_slot → TaskService.configure_slot → ImageSlot.configure → SQLiteChanges.update_slot → DTO → 工作台。
 
-## 数据库初始化及后续变更
+Domain 不依赖 FastAPI、SQLite 或模型 SDK。事务及文件端口都有实际调用方；没有创建 Context/AI/Runtime 空包或通用 Registry。
 
-只有 `task_drafts` 表，未预建 Asset / Slot / Version / Review / Run 模型。应用启动时，在 `BEGIN IMMEDIATE` 事务中检查 `PRAGMA user_version`：空库创建版本 1；版本 1 保留数据；未知版本拒绝启动，不自动清空或降级。
-
-后续 Schema 变更需要在 `SQLiteTaskStore.initialize` 增加明确的顺序迁移、升级版本号及迁移 / 保留数据测试，先备份已有数据库；不能通过删除数据库代替迁移。每个读写操作使用独立连接，连接显式关闭，写入在事务提交后才返回。
-
-## 检查和实际验证
+## 检查与验证边界
 
 ```bash
 backend/.venv/bin/python -m pytest backend/tests
@@ -113,12 +146,13 @@ npm --prefix frontend run build
 git diff --check
 ```
 
-本轮后端 20 项测试、前端 8 项测试、TypeScript 检查和生产构建通过。后端测试覆盖真实临时 SQLite、创建 / 查询 / 新应用恢复、无效输入不落库、未知 Schema 拒绝、存储错误、来源边界及不存在的生图入口。组件测试明确使用 HTTP mock，不能冒充浏览器、AI 或业务验收。
+本轮后端 48 项、前端 18 项、类型检查与构建通过。后端包含真实临时 SQLite/文件、V1 升级及失败回滚、并发幂等、跨 Task 拒绝、格式/体积/解码、缺库 GET、原文件哈希及符号链接测试。
+文件/DB 失败、提交确认丢失和上传中断采用明确的故障注入或 ASGI 模拟；前端使用 HTTP mock 验证过期成功/失败、结果未知重试、预览释放及保存绑定，不能冒充真实网络故障实测。另在本机 HTTP 验证了创建重放/409、跨 Task 绑定拒绝，并用真实 TCP 半关闭中断上传，未新增素材。
 
-实际运行验证使用独立新端口 8021 / 8022，在 Microsoft Edge 中完成真实创建、刷新恢复；随后停止并重启本轮 Uvicorn 进程，浏览器和 API 仍读取相同 UUID、名称、草稿状态及创建时间。真实 API 另核对空白名称 / 伪造就绪状态为 422，生图请求为 404，失败请求未新增记录。无商业数据的运行记录留在被忽略的 `.runtime/f01-verification.json`，不是 AI Execution Evidence。
+Microsoft Edge 实际上传了商品 JPEG 和营销参考 PNG，保存到原 F01 Task；真实缩略图、参考绑定、单图要求、刷新、任务中心重新进入及后端进程重启后恢复通过。
+实际下载字节 SHA-256 与旧仓只读输入副本一致。记录、素材及备份只在忽略的 .runtime 内；截图仅在本轮工具会话查看，未提交 Git。
+未模拟真实磁盘耗尽、断电或恶意高并发；本机安全边界不等于运营发布安全验收。
 
-旧仓来源为 I01 §8 记录的 `commerce-image-poc`：`main@371e3774…`，包括未提交模板差异。只读复核了模板和相关 CSS；沿用顶部导航、任务中心、可折叠浅色 INPUT、图位级参考布局及深色 OUTPUT。新 Shell 的禁用控件和草稿标识是本轮范围所需的明确差异，没有复制旧全局 JS、Planning 门禁或实验面板。
-
-已在桌面浏览器查看任务中心和恢复后的 INPUT，并核对 OUTPUT 空态与禁用控制；旧仓可用带数据只读页面仍缺失，历史 / 修改 / 审核 / Inspector 视觉对照未完成。截图仅在本轮工具会话中查看，未提交浏览器标签、商业资料或截图文件。完整响应式、键盘 / 辅助技术验收及运营 UI 接受尚未完成。
-
-**状态分别记录：F01-A ENGINEERING VERIFIED；F01-B UI BASELINE PENDING。** 不声明 F01 FULLY ACCEPTED，不将模型成功或工程测试等同业务接受。后续只按新授权进入 S01。
+旧 UI 来源为 I01 §8 的 commerce-image-poc。只读查看现有 8013 新建页，切换 Quick-A，核对浅色 INPUT、固定三列图位、动态组及未保存参考缩略图/移除交互，没有保存旧任务或触发 AI。
+新仓保留这些区域关系；增加明确的服务端素材区与图位选择，按本次“先保存素材、再独立绑定”的要求区分资产和图位身份；不继承旧全局脚本、另存 Task 方式或 Planning 门禁。
+候选/历史/修改/Pass/Inspector 的完整旧带数据视觉基线仍待补齐；完整响应式及辅助技术验收尚未完成。

@@ -1,4 +1,4 @@
-# F01 resolved runtime and test dependencies; see README for editable project installation.
+# S01 resolved runtime and test dependencies; see README for editable project installation.
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.16.0
@@ -11,6 +11,7 @@ idna==3.20
 iniconfig==2.3.1
 opentelemetry-api==1.45.2
 packaging==26.3
+pillow==13.0.0
 pluggy==1.7.0
 pydantic==2.14.2
 pydantic_core==2.50.2

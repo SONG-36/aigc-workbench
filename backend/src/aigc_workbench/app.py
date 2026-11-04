@@ -10,9 +10,10 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
 from .api import router
-from .application import TaskNotFound, TaskService
+from .application import StorageUnavailable, TaskNotFound, TaskService
 from .config import Settings
-from .domain import InvalidTask
+from .domain import Conflict, InvalidTask
+from .file_storage import LocalImageFiles
 from .persistence import SQLiteTaskStore
 
 logger = logging.getLogger(__name__)
@@ -27,19 +28,24 @@ def error(status: int, code: str, message: str, **extra) -> JSONResponse:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_environment()
     store = SQLiteTaskStore(settings.database_path)
+    files = LocalImageFiles(settings.data_dir)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         store.initialize()
-        app.state.task_service = TaskService(store)
+        files.initialize()
+        app.state.task_service = TaskService(store, files)
+        orphans = app.state.task_service.orphan_files()
+        if orphans:
+            logger.warning("Unreferenced immutable asset files retained for inspection: %s", orphans)
         yield
 
-    app = FastAPI(title="AIGC Workbench · F01", lifespan=lifespan)
+    app = FastAPI(title="AIGC Workbench · S01", lifespan=lifespan)
 
     @app.middleware("http")
     async def local_development_boundary(request: Request, call_next):
         if request.url.hostname not in {"127.0.0.1", "localhost", "::1"}:
-            return error(403, "LOCAL_ONLY", "F01 仅支持本机开发访问。")
+            return error(403, "LOCAL_ONLY", "当前仅支持本机开发访问。")
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             origin = request.headers.get("origin")
             same_origin = str(request.base_url).rstrip("/")
@@ -64,7 +70,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def missing_task(request: Request, exc: TaskNotFound):
         return error(404, "TASK_NOT_FOUND", str(exc))
 
+    @app.exception_handler(Conflict)
+    async def conflict(request: Request, exc: Conflict):
+        return error(409, "OPERATION_CONFLICT", str(exc))
+
     @app.exception_handler(sqlite3.Error)
+    @app.exception_handler(StorageUnavailable)
     async def storage_error(request: Request, exc: sqlite3.Error):
         logger.error("Task storage operation failed", exc_info=exc)
         return error(503, "STORAGE_UNAVAILABLE", "任务存储暂不可用，请查询状态后再操作。")

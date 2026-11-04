@@ -12,6 +12,6 @@ export function App() {
       <Route path="/workspace/new" element={<Workspace />} />
       <Route path="/workspace/:taskId" element={<Workspace />} />
       <Route path="*" element={<p role="alert">页面不存在。<Link to="/">返回任务中心</Link></p>} />
-    </Routes><footer>当前版本仅支持 Quick-A 草稿创建与恢复 · 尚不具备图片制作条件</footer></main>
+    </Routes><footer>当前版本支持 Quick-A 素材与图位保存恢复 · AI 执行未开放</footer></main>
   </>
 }
