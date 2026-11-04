@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aigc-workbench"
+version = "0.1.0"
+description = "F01 local application foundation; no AI execution"
+requires-python = ">=3.12"
+dependencies = ["fastapi>=0.120,<1", "uvicorn>=0.35,<1"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "httpx2>=2.16,<3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

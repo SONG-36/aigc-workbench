@@ -1,1 +1,16 @@
 .DS_Store
+
+# Local configuration, runtime data and dependencies
+.env
+.env.*
+!.env.example
+/.runtime/
+/backend/.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+/frontend/node_modules/
+/frontend/dist/
+/frontend/coverage/
+/frontend/.vite/
