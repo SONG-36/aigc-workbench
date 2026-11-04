@@ -35,8 +35,8 @@
 
 | 编号 | 专题 | 核心职责摘要 | 优先级 |
 |---|---|---|---|
-| T01 | 系统边界与业务对象（待补齐） | 核心对象、责任、来源权威与关系 | P0 |
-| T02 | Task Routing（讨论未完整归档） | 根据模式、图位、操作决定需要执行的能力 | P0 |
+| [T01](architecture/T01_SYSTEM_BOUNDARY.md) | 系统边界与业务对象 | 核心对象、责任、来源权威与关系 | P0 |
+| [T02](architecture/T02_TASK_ROUTING.md) | Task Routing | 根据模式、图位、操作决定需要执行的能力 | P0 |
 | [T03](architecture/T03_CONTEXT_ENGINEERING.md) | Context Engineering | 有效 Context 的组织、继承、更新与追溯 | P0 |
 | [T04](architecture/T04_RULES.md) | Rules | 确定性规则、业务约束和 AI 判断的边界 | P0 |
 | [T05](architecture/T05_AI_CAPABILITIES.md) | AI 能力架构 | 专业职责与 AI 能力的映射、复用和验证 | P0 |
@@ -49,7 +49,7 @@ P0：首轮架构需要明确核心设计。
 
 P1：需要明确职责及边界，具体实现可以延后。
 
-T01 / T02 暂无独立专题文件，不提供指向不存在文件的链接。
+T01～T09 的独立专题均已归档，详细研究以相应专题文件为准。
 
 <a id="research-status"></a>
 
@@ -57,8 +57,8 @@ T01 / T02 暂无独立专题文件，不提供指向不存在文件的链接。
 
 | 专题 | 当前进度 | 当前结论状态 |
 |---|---|---|
-| T01 系统边界 | 已有核心对象与信息权威概要，完整记录待补齐 | PROPOSED / INCOMPLETE RECORD |
-| T02 Task Routing | 曾在聊天中讨论，当前仓库未完整归档 | NOT STARTED IN REPOSITORY / PREVIOUS DISCUSSION NOT YET ARCHIVED |
+| [T01 系统边界](architecture/T01_SYSTEM_BOUNDARY.md) | RESEARCHED：已补录六类核心对象、信息权威、版本保护及两张图示 | PROPOSED / REVIEW PENDING |
+| [T02 Task Routing](architecture/T02_TASK_ROUTING.md) | RESEARCHED：已补录 Business / Capability Routing、操作矩阵、复用边界及两张图示 | PROPOSED / REVIEW PENDING |
 | [T03 Context Engineering](architecture/T03_CONTEXT_ENGINEERING.md) | RESEARCHED：已补全有效状态、按需组装、生命周期、执行证据及四张图示 | PROPOSED / REVIEW PENDING |
 | [T04 Rules](architecture/T04_RULES.md) | RESEARCHED：已完成第一轮规则分类、责任边界、场景、评价及两张图示整合 | PROPOSED / REVIEW PENDING |
 | [T05 AI 能力架构](architecture/T05_AI_CAPABILITIES.md) | RESEARCHED：已补全 C01～C08、三模式复用、执行策略、评价、实验建议及三张图示 | PROPOSED / REVIEW PENDING |
@@ -67,9 +67,9 @@ T01 / T02 暂无独立专题文件，不提供指向不存在文件的链接。
 | [T08 Orchestration & Runtime](architecture/T08_ORCHESTRATION_RUNTIME.md) | RESEARCHED：已补全 E01～E06、执行状态、Run / Attempt、安全恢复、多图位隔离及四张图示 | PROPOSED / REVIEW PENDING |
 | [T09 Evaluation](architecture/T09_EVALUATION_OBSERVABILITY.md) | RESEARCHED：已补全 L0～L3、能力评价、证据链、失败定位、长期意图保持、实验与四张图示 | PROPOSED / REVIEW PENDING |
 
-**整体研究状态：第一轮记录尚未齐备；PROPOSED / REVIEW PENDING / NOT IMPLEMENTED。** T01 尚不完整；T02 曾在聊天中讨论，但当前仓库未完整归档。本轮仅作内容迁移，不补写这两项，也不将整体标记为九专题第一轮研究完成。
+**整体研究归档状态：FIRST-ROUND ARCHITECTURE RESEARCH RECORDED。** T01～T09 均已有独立第一轮研究记录；技术方案仍为 `PROPOSED / REVIEW PENDING / NOT IMPLEMENTED`，不代表正式架构批准、工程验证或业务接受。
 
-专题中的“本轮／下一专题”及进度说明保留各自研究轮次含义；当前归档状态以本节为准。T03 的四图研究包含通过链接引用的总入口图 1。
+专题中的“本轮／下一专题”及进度说明保留各自研究轮次含义；T03～T09 中 T01 / T02 未完整归档的描述是补录前的历史快照，不改写其原文，当前归档状态以本节为准。T03 的四图研究包含通过链接引用的总入口图 1。
 
 现有记录没有已批准的技术架构决策。A01～A04 及下列专题结论均为候选，不因拆分或 Git 提交成为 DECIDED、IMPLEMENTED、VALIDATED 或 BUSINESS ACCEPTED。
 
@@ -77,6 +77,8 @@ T01 / T02 暂无独立专题文件，不提供指向不存在文件的链接。
 
 | 技术候选结论索引 | 唯一详细记录 |
 |---|---|
+| T01-A～T01-E | [T01 第 T01-12 节](architecture/T01_SYSTEM_BOUNDARY.md) |
+| T02-A～T02-F | [T02 第 T02-14 节](architecture/T02_TASK_ROUTING.md) |
 | T03-A～T03-G | [T03 第 6.10 节](architecture/T03_CONTEXT_ENGINEERING.md) |
 | T04-A～T04-F | [T04 第 7.11 节](architecture/T04_RULES.md) |
 | T05-A～T05-G | [T05 第 8.12 节](architecture/T05_AI_CAPABILITIES.md) |
@@ -184,14 +186,14 @@ Business Routing 先识别操作及目标，Effective State Resolution 再明确
 
 ### 后续验证及既有待办
 
-T09 第一轮研究记录已补全；九专题整体仍有 T01 / T02 记录缺口，本轮不继续补写或开始新专题。
+T01～T09 第一轮候选研究记录已归档；本轮不开始新专题，不进入架构总审或真实工程验证。
 
-后续方向仅作记录：处理已有记录缺口后，对 T01～T09 做简短一致性核对和必要统一总览，检查职责、术语及未经批准的前置条件，再选择真实 Quick-A 案例进行最小能力实验。本轮不开展架构总审、真实调试或工程实施。
+后续方向仅作记录：对已归档的 T01～T09 做简短一致性核对，检查职责、术语及未经批准的前置条件，再选择真实 Quick-A 案例进行最小能力实验。本轮不开展架构总审、真实调试或工程实施。
 
 保留待审及既有研究待办：
 
-- T01 核心对象与信息权威的收束。
-- T02 Task Routing 的任务识别与能力选择。
+- T01 第一轮核心对象、信息权威、两张图示及版本保护关系的审核与后续验证。
+- T02 第一轮两层 Routing、操作矩阵、复用边界及两张图示的审核与后续验证。
 - T03 候选结论及四张图示的审核，以及后续真实场景验证。
 - T04 第一轮候选结论、两张图示及规则评价方法的审核与后续验证。
 - T05 第一轮候选能力地图、三张图示及实验建议的审核与后续验证。
@@ -200,7 +202,7 @@ T09 第一轮研究记录已补全；九专题整体仍有 T01 / T02 记录缺�
 - T08 第一轮可靠执行、四张图示、状态及恢复策略的审核与后续故障验证。
 - T09 第一轮分层评价、四张图示、证据链及真实案例对照方案的审核与后续验证。
 
-后续仍依本节四轮顺序推进；T01 的不完整记录及 T02 的讨论未归档状态不因拆分改变。
+九专题研究记录归档后，后续评价及验证仍依本节既有研究路线推进；记录齐备不代表技术实现或实验验证已完成。
 
 ## 7. 研究与决策纪律
 
@@ -218,5 +220,7 @@ T09 第一轮研究记录已补全；九专题整体仍有 T01 / T02 记录缺�
 - **既有基线：** `f7c76a4fdf1aea77bbce404258da2e93d3c71b32`，05 V0.1 架构研究稿；T03～T09 已归档，T01 / T02 未完整归档。
 - **2026-11-04 文档组织调整：** 原第 6～12 节迁移至七份独立专题；图 1 及原说明留在总入口，T03 链接引用，图 2～22 随所属专题迁移；保留原章节号、图号、结论编号及研究状态。
 - 各专题既有研究记录和来源引用随原文保存。本轮不新增架构结论，不补写 T01 / T02，不修复既有图示 P2 问题，不代表业务批准或技术验证通过。
+
+- **2026-11-04 T01 / T02 补录：** 依据本轮提供的具体内容新增两份专题、T01-A～E 与 T02-A～F 候选结论及四张 Mermaid 图；更新导航和研究归档状态。上列拆分记录保留当时的未归档事实，本次不改写 T03～T09 历史正文，不处理其他 P2 问题，也不构成工程开发授权。
 
 **本文件是技术架构研究主记录，不代表 V1 技术方案已经批准。**
