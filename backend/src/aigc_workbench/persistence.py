@@ -137,6 +137,36 @@ V6_TABLES = [
        WHERE state IN ('QUEUED','RUNNING','OUTCOME_UNKNOWN')""",
 ]
 
+# Human reviews are append-only. Only an explicit PASS updates a slot's delivery pointer.
+V7_TABLES = [
+    """CREATE TABLE image_reviews (
+        id TEXT PRIMARY KEY NOT NULL, operation_id TEXT NOT NULL UNIQUE,
+        task_id TEXT NOT NULL REFERENCES task_drafts(id), slot_id TEXT NOT NULL REFERENCES image_slots(id),
+        image_version_id TEXT NOT NULL REFERENCES image_versions(id),
+        decision TEXT NOT NULL CHECK(decision IN ('PASS','REJECT')),
+        reviewer TEXT NOT NULL, reviewed_at TEXT NOT NULL, feedback TEXT NOT NULL,
+        image_sha256 TEXT NOT NULL, source TEXT NOT NULL CHECK(source IN ('EXPLICIT_OPERATOR','TEST_REVIEW')),
+        body_json TEXT NOT NULL, body_sha256 TEXT NOT NULL
+    )""",
+    """CREATE TRIGGER review_scope BEFORE INSERT ON image_reviews
+       WHEN NOT EXISTS (SELECT 1 FROM image_versions v WHERE v.id=NEW.image_version_id
+         AND v.task_id=NEW.task_id AND v.slot_id=NEW.slot_id)
+       BEGIN SELECT RAISE(ABORT, 'review version scope mismatch'); END""",
+    """CREATE TABLE slot_deliveries (
+        task_id TEXT NOT NULL REFERENCES task_drafts(id), slot_id TEXT PRIMARY KEY NOT NULL REFERENCES image_slots(id),
+        image_version_id TEXT NOT NULL REFERENCES image_versions(id),
+        review_id TEXT NOT NULL REFERENCES image_reviews(id), updated_at TEXT NOT NULL
+    )""",
+]
+for _action in ("UPDATE", "DELETE"):
+    V7_TABLES.append(f"""CREATE TRIGGER image_reviews_immutable_{_action.lower()} BEFORE {_action} ON image_reviews
+        BEGIN SELECT RAISE(ABORT, 'immutable human review'); END""")
+for _action in ("INSERT", "UPDATE"):
+    V7_TABLES.append(f"""CREATE TRIGGER legal_delivery_{_action.lower()} BEFORE {_action} ON slot_deliveries
+        WHEN NOT EXISTS (SELECT 1 FROM image_reviews r WHERE r.id=NEW.review_id AND r.decision='PASS'
+          AND r.task_id=NEW.task_id AND r.slot_id=NEW.slot_id AND r.image_version_id=NEW.image_version_id)
+        BEGIN SELECT RAISE(ABORT, 'delivery requires matching explicit Pass'); END""")
+
 
 def asset_from_row(row: sqlite3.Row) -> Asset:
     return Asset(UUID(row["id"]), UUID(row["task_id"]), AssetRole(row["role"]), row["filename"],
@@ -174,7 +204,7 @@ class SQLiteTaskStore:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("BEGIN IMMEDIATE")
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, 1, 2, 3, 4, 5, 6}:
+            if version not in {0, 1, 2, 3, 4, 5, 6, 7}:
                 raise RuntimeError(f"Unsupported database schema version: {version}")
             if version == 0:
                 connection.execute(V1_TASKS)
@@ -201,6 +231,11 @@ class SQLiteTaskStore:
                 for statement in V6_TABLES:
                     connection.execute(statement)
                 connection.execute("PRAGMA user_version = 6")
+                version = 6
+            if version == 6:
+                for statement in V7_TABLES:
+                    connection.execute(statement)
+                connection.execute("PRAGMA user_version = 7")
             if connection.execute("PRAGMA foreign_key_check").fetchone():
                 raise RuntimeError("Database foreign-key validation failed")
 

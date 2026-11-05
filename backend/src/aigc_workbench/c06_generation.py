@@ -26,12 +26,12 @@ PARAMETERS = {"model": MODEL, "size": "1024x1536", "quality": "high", "complexit
               "n": 1, "stream": False, "output_format": "png"}
 
 
-def estimate_image_cost(prompt: str) -> dict:
+def estimate_image_cost(prompt: str, image_count: int = 2) -> dict:
     # Current official calculator: high grid edge=48, other edge=32 at 1024x1536.
     output_tokens = ceil(48 * 32 * (2_000_000 + 1024 * 1536) / 4_000_000)
     # Explicit planning allowances, not an official image-input tokenizer or provider cap.
     text_allowance = len(prompt.encode()) + 1024
-    image_allowance = 32768 * 2
+    image_allowance = 32768 * image_count
     total = (Decimal(text_allowance) * 5 + Decimal(image_allowance) * 8 + output_tokens * 30) / 1_000_000
     return {"label": "LOCAL_PLANNING_ESTIMATE_NOT_PROVIDER_CAP", "currency": "USD",
             "planning_envelope_usd": str(total), "official_output_token_estimate": output_tokens,

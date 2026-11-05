@@ -4,8 +4,19 @@ export type ExecutionState = 'NOT_STARTED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' 
 export interface Candidate {
   image_version_id: string; candidate_id: string; task_id: string; slot_id: string; run_id: string
   created_at: string; product_asset_id: string; reference_asset_id: string
-  status: 'CANDIDATE_REVIEW_PENDING'; operator_approved: false; pass: false; url: string
+  status: 'CANDIDATE_REVIEW_PENDING'; operator_approved: boolean; pass: boolean; url: string
+  base_image_version_id?: string | null; revision_text?: string | null
+  review_status?: 'PENDING' | 'PASS' | 'REJECT'; is_current_delivery?: boolean; has_historical_pass?: boolean
   image: { width: number; height: number; size_bytes: number; sha256: string }
+}
+export interface ImageReview {
+  id: string; operation_id: string; task_id: string; slot_id: string; image_version_id: string
+  decision: 'PASS' | 'REJECT'; reviewer: string; reviewed_at: string; feedback: string
+  source: 'TEST_REVIEW' | 'EXPLICIT_OPERATOR'
+}
+export interface RevisionQuote {
+  snapshot_id: string; base_image_version_id: string; base_sha256: string; revision_text: string
+  quote_token: string; model: string; estimate_usd: string; max_cost_usd: string
 }
 export interface Execution {
   operation_id: string; run_id: string | null; attempt_id: string | null; state: ExecutionState
@@ -21,6 +32,8 @@ export interface SlotWorkspace {
     max_cost_usd: string; estimate_usd: string | null; decision_snapshot_id: string | null
     product_asset_id: string | null; reference_asset_id: string | null
   }
+  can_request_revision?: boolean; reviews?: ImageReview[]
+  delivery?: (ImageReview & { url: string }) | null
 }
 const states = ['NOT_STARTED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'OUTCOME_UNKNOWN']
 
@@ -30,12 +43,40 @@ export async function getSlotWorkspace(taskId: string, slotId: string, signal?: 
     || !value.readiness || typeof value.readiness.can_generate !== 'boolean'
     || !Array.isArray(value.candidates) || !Array.isArray(value.executions)
     || !value.candidates.every(c => c.task_id === taskId && c.slot_id === slotId
-      && c.status === 'CANDIDATE_REVIEW_PENDING' && c.pass === false && c.operator_approved === false
+      && c.status === 'CANDIDATE_REVIEW_PENDING' && c.pass === (c.review_status === 'PASS') && c.operator_approved === c.pass
       && c.url === `/api/tasks/${taskId}/slots/${slotId}/versions/${c.image_version_id}/content`)
-    || !value.executions.every(e => states.includes(e.state) && ['REAL', 'TEST_SUBSTITUTE'].includes(e.execution_mode))) {
+    || !value.executions.every(e => states.includes(e.state) && ['REAL', 'TEST_SUBSTITUTE'].includes(e.execution_mode))
+    || !(value.reviews || []).every(r => r.task_id === taskId && r.slot_id === slotId && ['PASS', 'REJECT'].includes(r.decision))
+    || (value.delivery && (value.delivery.task_id !== taskId || value.delivery.slot_id !== slotId
+      || value.delivery.decision !== 'PASS' || !value.candidates.some(c => c.image_version_id === value.delivery?.image_version_id && c.pass)
+      || value.delivery.url !== `/api/tasks/${taskId}/slots/${slotId}/delivery?review_id=${value.delivery.id}`))) {
     throw new ApiError('服务器返回的候选或执行记录不符合当前图位，未应用。', 'unknown')
   }
   return value
+}
+
+export function quoteRevision(taskId: string, slotId: string, baseId: string, revisionText: string): Promise<RevisionQuote> {
+  return request(`/tasks/${taskId}/slots/${slotId}/versions/${baseId}/revision-quote`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision_text: revisionText }),
+  }) as Promise<RevisionQuote>
+}
+
+export function reviseImage(taskId: string, slotId: string, operationId: string, quote: RevisionQuote) {
+  return request(`/tasks/${taskId}/slots/${slotId}/revisions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      operation_id: operationId, snapshot_id: quote.snapshot_id, quote_token: quote.quote_token,
+      confirm_paid: true, max_cost_usd: '1.00',
+    }),
+  })
+}
+
+export function reviewImage(taskId: string, slotId: string, versionId: string, operationId: string,
+  decision: 'PASS' | 'REJECT', reviewer: string, feedback: string, currentReviewId: string | null) {
+  return request(`/tasks/${taskId}/slots/${slotId}/versions/${versionId}/reviews`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      operation_id: operationId, decision, reviewer, feedback, expected_current_review_id: currentReviewId,
+    }),
+  })
 }
 
 export async function generateImage(taskId: string, slotId: string, operationId: string, quoteToken: string) {

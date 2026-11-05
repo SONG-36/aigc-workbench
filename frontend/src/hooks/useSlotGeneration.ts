@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ApiError } from '../api/tasks'
-import { generateImage, getSlotWorkspace, type SlotWorkspace } from '../api/generation'
+import { generateImage, getSlotWorkspace, reviseImage, type RevisionQuote, type SlotWorkspace } from '../api/generation'
 import type { ImageSlot, TaskDraft } from '../types'
 
 /** Reads may poll; a paid POST only occurs once inside the explicit submit action. */
@@ -40,14 +40,15 @@ export function useSlotGeneration(task: TaskDraft, slot: ImageSlot) {
     return () => { controller.abort(); clearTimeout(timer) }
   }, [task.id, slot.id, slot.reference_asset_id, slot.output_size, slot.requirements, task.assets.length, revision])
 
-  async function submit() {
-    if (locked.current || uncertain || !data?.readiness.can_generate || !data.readiness.quote_token) return
+  async function send(quote?: RevisionQuote) {
+    if (locked.current || uncertain || (quote ? !data?.can_request_revision : !data?.readiness.can_generate || !data.readiness.quote_token)) return
     locked.current = true
     const operation = crypto.randomUUID()
     pendingOperation.current = operation
     setSubmitting(true); setError(null)
     try {
-      await generateImage(task.id, slot.id, operation, data.readiness.quote_token)
+      if (quote) await reviseImage(task.id, slot.id, operation, quote)
+      else await generateImage(task.id, slot.id, operation, data!.readiness.quote_token!)
     } catch (cause) {
       if (!mounted.current) return
       const unknown = !(cause instanceof ApiError) || cause.outcome === 'unknown'
@@ -59,5 +60,6 @@ export function useSlotGeneration(task: TaskDraft, slot: ImageSlot) {
       if (mounted.current) { setSubmitting(false); setRevision(value => value + 1) }
     }
   }
-  return { data, error, submitting, uncertain, submit, refresh: () => setRevision(value => value + 1) }
+  return { data, error, submitting, uncertain, submit: () => send(), submitRevision: (quote: RevisionQuote) => send(quote),
+    refresh: () => setRevision(value => value + 1) }
 }

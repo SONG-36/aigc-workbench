@@ -155,3 +155,28 @@ describe('Workspace candidate review and controlled C06 requests (no paid API)',
     expect(fetch.mock.calls.every(([, options]) => !options?.method)).toBe(true)
   })
 })
+
+it('keeps modification drafts separate across slots in the existing Workspace', async () => {
+  const second = { ...task.slots[0], id: 'selling-slot', kind: 'selling_point' as const, position: 1 }
+  const multi = { ...task, slots: [...task.slots, second] }
+  const fetch = vi.fn().mockImplementation((path: string) => {
+    if (path.endsWith('/workspace')) {
+      const slot = path.includes('/selling-slot/') ? second.id : task.slots[0].id
+      return Promise.resolve(json({ ...initial, slot_id: slot, can_request_revision: true,
+        candidates: [{ ...candidate, slot_id: slot, image_version_id: `version-${slot}`,
+          url: `/api/tasks/${task.id}/slots/${slot}/versions/version-${slot}/content` }] }))
+    }
+    return Promise.resolve(json(multi))
+  }); vi.stubGlobal('fetch', fetch)
+  mount(); const user = userEvent.setup()
+  await user.click(await screen.findByText('以当前查看版本为修改基础'))
+  await user.type(screen.getByLabelText('本轮修改意见'), 'Main draft stays with main')
+  await user.click(screen.getByRole('button', { name: '卖点图 1' }))
+  await user.click(await screen.findByText('以当前查看版本为修改基础'))
+  expect(screen.getByLabelText('本轮修改意见')).toHaveValue('')
+  await user.type(screen.getByLabelText('本轮修改意见'), 'Selling draft stays with selling')
+  await user.click(screen.getByRole('button', { name: '主图' }))
+  await screen.findByText('以当前查看版本为修改基础')
+  expect(screen.getByLabelText('本轮修改意见')).toHaveValue('Main draft stays with main')
+  expect(fetch.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
+})

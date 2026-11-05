@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import type { ImageSlot, TaskDraft } from '../types'
 import { useSlotGeneration } from '../hooks/useSlotGeneration'
 import type { ExecutionState } from '../api/generation'
+import { RevisionPanel, ReviewPanel, type RevisionDrafts } from './RevisionReviewPanel'
 
 const kinds = { main: '主图', comparison: '同类商品对比图', selling_point: '卖点图', scene: '场景图' }
 const labels: Record<ExecutionState, string> = {
@@ -30,7 +31,9 @@ function Overlay({ title, onClose, children }: { title: string; onClose: () => v
   </div>
 }
 
-function SlotOutput({ task, slot, locked }: { task: TaskDraft; slot: ImageSlot; locked: boolean }) {
+function SlotOutput({ task, slot, locked, draft, setDraft }: {
+  task: TaskDraft; slot: ImageSlot; locked: boolean; draft: RevisionDrafts; setDraft: (draft: RevisionDrafts) => void
+}) {
   const generation = useSlotGeneration(task, slot)
   const [selected, setSelected] = useState('')
   const [viewer, setViewer] = useState<{ url: string; title: string } | null>(null)
@@ -66,17 +69,26 @@ function SlotOutput({ task, slot, locked }: { task: TaskDraft; slot: ImageSlot; 
           <label>历史候选版本<select aria-label="历史候选版本" value={candidate.image_version_id}
             onChange={event => setSelected(event.target.value)}>
             {data.candidates.map((c, index) => <option key={c.image_version_id} value={c.image_version_id}>
-              候选 {data.candidates.length - index} · {new Date(c.created_at).toLocaleString()}</option>)}
+              候选 {data.candidates.length - index} · {c.review_status || 'PENDING'} · {new Date(c.created_at).toLocaleString()}</option>)}
           </select></label>
           <button className="candidate-image" aria-label="放大查看候选原图"
             onClick={() => setViewer({ url: candidate.url, title: '生成候选 · 原始 PNG' })}>
             <img src={candidate.url} alt="当前图位的已保存生成候选" /></button>
-          <p className="muted">待人工审核 · {candidate.image.width}×{candidate.image.height} ·
+          <p className="muted">{candidate.review_status || 'PENDING'}{candidate.is_current_delivery ? ' · 当前有效交付' : ''} · {candidate.image.width}×{candidate.image.height} ·
             {new Date(candidate.created_at).toLocaleString()}</p>
           <p className="muted">版本 {candidate.image_version_id}</p>
+          {candidate.base_image_version_id && <p className="muted">修改基础 {candidate.base_image_version_id}<br />本轮：{candidate.revision_text}</p>}
           <a href={candidate.url} target="_blank" rel="noreferrer">打开原始 PNG</a>
+          <RevisionPanel taskId={task.id} slotId={slot.id} candidate={candidate} data={data} draft={draft} setDraft={setDraft}
+            select={setSelected} disabled={locked || submitting || uncertain || !!error} submit={generation.submitRevision} />
+          <ReviewPanel key={candidate.image_version_id} taskId={task.id} slotId={slot.id} candidate={candidate} data={data}
+            disabled={locked} refresh={generation.refresh} />
         </> : <div className="empty">本图位尚无已保存的候选图片。</div>}
-        <p className="muted">查看历史候选不会设为 Pass。修改、Pass / Reject 尚未开放。</p>
+        <section className="delivery-panel" aria-label="当前有效交付"><h3>当前有效交付</h3>
+          {data.delivery ? <><p>Pass 版本 {data.delivery.image_version_id}</p>
+            <p className="muted">{data.delivery.reviewer} · {new Date(data.delivery.reviewed_at).toLocaleString()}</p>
+            <a href={data.delivery.url}>下载当前有效交付 PNG</a></> : <p>尚无人工 Pass；候选不能作为有效交付下载。</p>}
+        </section>
       </div>
       <aside className="candidate-sources" aria-label="商品与参考来源">
         <h3>{candidate ? '本候选来源对照' : '当前商品与参考'}</h3>
@@ -120,6 +132,7 @@ export function GenerationWorkspace({ task, locked, unsavedSlots }: {
   task: TaskDraft; locked: boolean; unsavedSlots: Set<string>
 }) {
   const [search, setSearch] = useSearchParams()
+  const [drafts, setDrafts] = useState<Record<string, RevisionDrafts>>({})
   const selected = task.slots.find(s => s.id === search.get('slot')) || task.slots[0]
   if (!selected) return <><button disabled>生成一张候选（付费）</button>
     <div className="empty">请先保存一个图位；尚未开始生成。</div></>
@@ -128,5 +141,7 @@ export function GenerationWorkspace({ task, locked, unsavedSlots }: {
       setSearch(previous => { const next = new URLSearchParams(previous); next.set('slot', s.id); return next }, { replace: true })
     }}>{kinds[s.kind]}{['selling_point', 'scene'].includes(s.kind)
       ? ` ${task.slots.filter(item => item.kind === s.kind).findIndex(item => item.id === s.id) + 1}` : ''}</button>)}
-  </nav><SlotOutput key={selected.id} task={task} slot={selected} locked={locked || unsavedSlots.has(selected.id)} /></div>
+  </nav><SlotOutput key={selected.id} task={task} slot={selected} locked={locked || unsavedSlots.has(selected.id)}
+    draft={drafts[`${task.id}/${selected.id}`] || { baseId: '', texts: {} }}
+    setDraft={value => setDrafts(previous => ({ ...previous, [`${task.id}/${selected.id}`]: value }))} /></div>
 }

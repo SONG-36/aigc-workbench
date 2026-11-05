@@ -1,4 +1,4 @@
-"""One local C06 dispatch worker. Durable receipts, existing Run identity, zero automatic replay."""
+"""One local C06/C07 dispatch worker. Existing Run identity, durable receipts, zero automatic replay."""
 
 from concurrent.futures import ThreadPoolExecutor
 import fcntl

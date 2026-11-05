@@ -452,5 +452,22 @@ C01 初步评价仅作待人工复核的质量记录；后续不得仅凭其不�
 无自动重试、模型切换、第二张生成或运营 Pass；超时保留 `OUTCOME_UNKNOWN`，同一操作不会再次发送付费请求。
 
 SQLite V5 仅增加不可变 `image_versions` 记录，候选 PNG 保存在 `.runtime/f01/image_versions/`，关联真实 Task/Slot/Run/来源，状态固定为 `CANDIDATE_REVIEW_PENDING`。
-若图片本地保存失败，先查已有 Run，使用同一操作恢复本地保存，不能换 Operation ID 重新付费。现有工作台生成按钮仍未启用。
+若图片本地保存失败，先查已有 Run，使用同一操作恢复本地保存，不能换 Operation ID 重新付费。工作台付费入口默认关闭，仅在下述开发开关与费用确认后启用。
 请求、原始响应及对照评价材料位于被忽略的 `.runtime/c06-real/`，不提交图片、运行数据或凭证。
+
+
+### Quick-A Pilot P1：修改、人工审核与有效交付
+
+沿用 Workspace OUTPUT 区及 [generation_application.py](backend/src/aigc_workbench/generation_application.py)，不创建第二个工作台或 Runtime。
+开发启动显式设置 `AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 AIGC_ENABLE_C01_REAL=1 AIGC_ENABLE_C06_REAL=1 AIGC_ENABLE_C07_REAL=1 AIGC_ENABLE_WORKSPACE_GENERATION=1`，再使用原 uvicorn 命令。默认启动不开放真实生成或修改。
+
+- 先在历史候选中查看版本，再明确选择“以当前查看版本为修改基础”。预览切换不会串用修改草稿；草稿按图位与基础版本保留在当前页面内存中，刷新或离开页面前须自行保留未提交文字。
+- [c07_revision.py](backend/src/aigc_workbench/c07_revision.py) 使用四层 Prompt、选定基础 PNG、实际商品及当前参考三张图片。只带当前保存的约束及本轮意见，保留基础图已实现的有效设计，不重放历史修改文字，不重新执行 C01～C06。
+- “检查修改与费用”只冻结新 Snapshot、校验来源及计算估算，不调用模型；随后显式确认一次付费修改。仍使用原单线程持久派发、Operation ID、真实 Run/Evidence、固定模型与 USD 1.00 本地估算守卫，不重试、不切换模型。页面查询、刷新及后端重启不重新发送请求；结果未知时先查证，不创建另一笔收费操作。
+- 新 PNG 保存为独立 Image Version，关联基础版本和本轮意见；旧图片、Snapshot、原始模型响应和历史制作决定不可变。失败或新候选不会替换当前有效 Pass。
+- [image_review.py](backend/src/aigc_workbench/image_review.py) 的人工审核是独立追加记录，保存版本、图片 SHA、审核人、时间和反馈。审核人是本地手填身份，尚无账户鉴权，不可开放公网。模型不能自动 Pass。
+- SQLite V7 在 V6 上追加 `image_reviews` 与 `slot_deliveries`；旧执行和版本行不改写。只有显式人工 Pass 更新对应图位的有效交付；Reject 保留候选与历史。已有 Pass 的撤销不属于本轮功能。
+- 下载接口只读取当前合法 Pass 的 PNG，核对业务归属和文件哈希；携带旧审核身份的下载链接返回冲突。历史 PNG 仍可预览，但不等于当前有效交付。审核使用操作幂等与当前交付身份校验，避免多页签静默覆盖。
+- 仅测试注入的替代工具产生 `TEST_SUBSTITUTE` / `TEST_REVIEW`，不证明真实模型质量或业务接受；生产读取拒绝将测试审核当作真实 Pass。
+
+运行数据、商业图片和完整请求/响应仅保留在已忽略的 `.runtime` 及 SQLite 中，不提交 Git。真实生成成功不等于商品结构正确、运营批准或 Pass。

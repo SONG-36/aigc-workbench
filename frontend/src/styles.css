@@ -147,3 +147,10 @@ footer { margin-top: 32px; padding: 18px 0; text-align: center; color: var(--mut
   .brand { font-size: 14px; }
   .dynamic-slots button { width: 100%; min-width: 0; }
 }
+
+.revision-panel, .review-panel, .delivery-panel { margin-top: 1.2rem; padding-top: 1rem; border-top: 1px solid var(--border, #dce3ec); }
+.revision-panel textarea, .review-panel textarea { width: 100%; min-height: 5rem; resize: vertical; }
+.revision-panel label, .review-panel label { display: block; margin: .7rem 0; }
+.review-panel input { display: block; width: 100%; }
+.review-actions { display: flex; gap: .5rem; }
+.paid-confirm { margin-top: 1rem; border: 1px solid #b5c8dd; border-radius: 8px; }

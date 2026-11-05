@@ -339,6 +339,8 @@ def test_v3_to_v4_migration_preserves_s02_and_rolls_back(experiment, monkeypatch
     with sqlite3.connect(dbpath) as db:
         db.execute("DROP TRIGGER c01_model_runs_terminal")
         db.execute("DROP TRIGGER c01_model_runs_retain")
+        db.execute('DROP TABLE slot_deliveries')
+        db.execute('DROP TABLE image_reviews')
         db.execute("DROP TABLE c01_model_runs")
         db.execute("DROP TABLE image_versions")  # Reconstruct an actual pre-C06 v3 test schema.
         db.execute("DROP TABLE c06_dispatches")

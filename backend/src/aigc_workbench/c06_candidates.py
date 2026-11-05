@@ -51,7 +51,7 @@ class CandidateStore:
         if (slot is None or slot["task_id"] != str(task_id)
                 or {r["id"]: r["role"] for r in assets} != {
                     body["product_asset_id"]: "product_image", body["reference_asset_id"]: "marketing_reference"}
-                or run.get("capability") != "C06" or run["status"] != "SUCCEEDED"
+                or run.get("capability") not in {"C06", "C07"} or run["status"] != "SUCCEEDED"
                 or run.get("task_id") != str(task_id) or run.get("slot_id") != str(slot_id)
                 or run.get("product_asset_id") != body["product_asset_id"]
                 or run.get("reference_asset_id") != body["reference_asset_id"]
@@ -95,6 +95,9 @@ class CandidateStore:
                 "source_provenance": snapshot["source_provenance"], "image": asdict(metadata),
                 "file": str(target.resolve()), "status": "CANDIDATE_REVIEW_PENDING",
                 "operator_approved": False, "pass": False, "created_at": run["finished_at"] or now()}
+        if snapshot["capability"] == "C07":
+            body.update(base_image_version_id=snapshot["base_image_version_id"],
+                        revision_text=snapshot["context"]["revision_text"])
         with self.database.connection(write=True) as db:
             existing = db.execute("SELECT body_json FROM image_versions WHERE run_id=?", (run["run_id"],)).fetchone()
             if existing:

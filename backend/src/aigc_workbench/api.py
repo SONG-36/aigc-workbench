@@ -117,6 +117,24 @@ class GenerateImageRequest(BaseModel):
     max_cost_usd: Literal["1.00"]
 
 
+class RevisionQuoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision_text: str = Field(strict=True, min_length=1, max_length=2000)
+
+
+class ReviseImageRequest(GenerateImageRequest):
+    snapshot_id: UUID
+
+
+class ReviewImageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operation_id: UUID
+    decision: Literal["PASS", "REJECT"]
+    reviewer: str = Field(strict=True, min_length=1, max_length=80)
+    feedback: str = Field(default="", strict=True, max_length=2000)
+    expected_current_review_id: UUID | None
+
+
 @router.get("/tasks/{task_id}/slots/{slot_id}/workspace")
 def slot_workspace(task_id: UUID, slot_id: UUID, service: Generation):
     return service.workspace(task_id, slot_id)
@@ -125,6 +143,32 @@ def slot_workspace(task_id: UUID, slot_id: UUID, service: Generation):
 @router.post("/tasks/{task_id}/slots/{slot_id}/generations", status_code=202)
 def generate_image(task_id: UUID, slot_id: UUID, body: GenerateImageRequest, service: Generation):
     return service.submit(task_id, slot_id, body.operation_id, body.quote_token, body.max_cost_usd)
+
+
+@router.post("/tasks/{task_id}/slots/{slot_id}/versions/{version_id}/revision-quote")
+def revision_quote(task_id: UUID, slot_id: UUID, version_id: UUID, body: RevisionQuoteRequest, service: Generation):
+    return service.revision_quote(task_id, slot_id, version_id, body.revision_text)
+
+
+@router.post("/tasks/{task_id}/slots/{slot_id}/revisions", status_code=202)
+def revise_image(task_id: UUID, slot_id: UUID, body: ReviseImageRequest, service: Generation):
+    return service.submit_revision(task_id, slot_id, body.operation_id, body.snapshot_id, body.quote_token, body.max_cost_usd)
+
+
+@router.post("/tasks/{task_id}/slots/{slot_id}/versions/{version_id}/reviews", status_code=201)
+def review_image(task_id: UUID, slot_id: UUID, version_id: UUID, body: ReviewImageRequest, service: Generation):
+    return service.review(task_id, slot_id, version_id, body.operation_id, body.decision, body.reviewer,
+                          body.feedback, body.expected_current_review_id)
+
+
+@router.get("/tasks/{task_id}/slots/{slot_id}/delivery")
+def download_delivery(task_id: UUID, slot_id: UUID, review_id: UUID, service: Generation):
+    candidate, content = service.delivery(task_id, slot_id, review_id)
+    return Response(content, media_type="image/png", headers={
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store",
+        "ETag": '"' + candidate["image"]["sha256"] + '"',
+        "Content-Disposition": f'attachment; filename="quick-a-{slot_id}-{candidate["image_version_id"]}.png"',
+    })
 
 
 @router.get("/tasks/{task_id}/slots/{slot_id}/versions/{version_id}/content")
