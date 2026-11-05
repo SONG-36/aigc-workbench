@@ -9,6 +9,11 @@ import http.client
 import json
 from math import ceil
 import os
+import ssl
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from .c01_context import C01Error, canonical
 from .c01_prompt import OUTPUT_CONTRACT, OUTPUT_FIELDS
@@ -100,30 +105,132 @@ class HTTPResult:
     request_id: str | None
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None  # Even same-origin redirects must not replay a paid POST.
+
+
+def _proxy_configuration() -> tuple[dict, str]:
+    """Explicit environment policy; no system-proxy discovery or failure-to-direct fallback."""
+    proxies = urllib.request.getproxies_environment()
+    if urllib.request.proxy_bypass_environment("api.openai.com:443", proxies):
+        return {}, "DIRECT_NO_PROXY"
+    selected = proxies.get("https") or proxies.get("all")
+    if not selected:
+        return {}, "DIRECT_NO_PROXY_CONFIGURED"
+    try:
+        parsed = urllib.parse.urlsplit(selected)
+        if parsed.scheme != "http":
+            raise C01Error("MODEL_PROXY_SCHEME_UNSUPPORTED", "MODEL_TRANSPORT",
+                           "标准库入口只支持 HTTP CONNECT 代理；其他代理协议不转为直连。")
+        if (not parsed.hostname or parsed.port == 0 or parsed.path not in {"", "/"}
+                or parsed.query or parsed.fragment or any(char.isspace() for char in selected)):
+            raise ValueError()
+        # urllib applies Basic proxy authentication only when both are present.
+        if (parsed.username is None) != (parsed.password is None):
+            raise ValueError()
+    except C01Error:
+        raise
+    except ValueError:
+        raise C01Error("MODEL_PROXY_INVALID", "MODEL_TRANSPORT", "代理配置格式无效；未转为直连。") from None
+    return {"https": selected}, "HTTPS_PROXY" if proxies.get("https") else "ALL_PROXY"
+
+
+def _redact_response(value: bytes, key: str, proxies: dict) -> bytes:
+    secrets = [(key, b"[REDACTED_API_KEY]")]
+    for proxy in proxies.values():
+        parsed = urllib.parse.urlsplit(proxy)
+        if parsed.username is not None and parsed.password is not None:
+            user, password = urllib.parse.unquote(parsed.username), urllib.parse.unquote(parsed.password)
+            secrets.extend((secret, b"[REDACTED_PROXY_CREDENTIAL]") for secret in
+                           [proxy, user + ":" + password, user, password,
+                            base64.b64encode((user + ":" + password).encode()).decode()])
+    for secret, marker in sorted(set(secrets), key=lambda entry: len(entry[0]), reverse=True):
+        if secret:
+            for representation in {secret, json.dumps(secret, ensure_ascii=False)[1:-1],
+                                   json.dumps(secret, ensure_ascii=True)[1:-1]}:
+                value = value.replace(representation.encode(), marker)
+    return value
+
+
 class OpenAIResponsesTransport:
-    """No SDK, retries, redirects, proxy/env endpoints, tools, file uploads or follow-up requests."""
+    """One proxy-aware HTTPS operation, fixed origin, verified TLS, no redirects or retries."""
     label = "REAL_PROVIDER_TRANSPORT"
 
     def send(self, payload: bytes) -> HTTPResult:
+        result, _ = self._request("POST", "/v1/responses", payload)
+        return result
+
+    def _request(self, method: str, path: str, payload: bytes | None) -> tuple[HTTPResult, str]:
+        if (method, path) not in {("POST", "/v1/responses"), ("GET", "/v1/models/" + MODEL)}:
+            raise C01Error("MODEL_TARGET_NOT_ALLOWED", "MODEL_TRANSPORT", "仅允许固定官方 API 目标。")
+        if os.environ.get("OPENAI_BASE_URL"):
+            raise C01Error("CUSTOM_ENDPOINT_NOT_SUPPORTED", "MODEL_TRANSPORT", "仅支持官方固定 API 目标。")
         key = os.environ.get("OPENAI_API_KEY", "").strip()
         if not key or "\r" in key or "\n" in key:
             raise C01Error("MODEL_CREDENTIAL_INVALID", "MODEL_TRANSPORT", "凭证缺失或格式无效。")
-        connection = http.client.HTTPSConnection("api.openai.com", timeout=TIMEOUT_SECONDS)
+        proxies, route = _proxy_configuration()
+        response = None
         try:
-            connection.request("POST", "/v1/responses", body=payload,
-                               headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
-            response = connection.getresponse()
+            context = ssl.create_default_context()  # CERT_REQUIRED + hostname verification.
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxies),
+                                                 urllib.request.HTTPSHandler(context=context), _NoRedirect())
+            headers = {"Authorization": "Bearer " + key}
+            if method == "POST":
+                headers["Content-Type"] = "application/json"
+            request = urllib.request.Request("https://api.openai.com" + path, data=payload,
+                                             headers=headers, method=method)
+            try:
+                response = opener.open(request, timeout=TIMEOUT_SECONDS)
+            except urllib.error.HTTPError as exc:
+                response = exc  # Preserve actual error status/body for existing Run/Evidence handling.
             body = response.read(MAX_RESPONSE_BYTES + 1)
             if len(body) > MAX_RESPONSE_BYTES:
                 raise C01Error("RESPONSE_TOO_LARGE", "MODEL_TRANSPORT", "响应超过本实验读取上限；结果不完整。")
-            # A provider may echo a key in an error. Preserve a redacted raw body, never log headers.
-            body = body.replace(key.encode(), b"[REDACTED_API_KEY]")
-            request_id = response.getheader("x-request-id")
+            body = _redact_response(body, key, proxies)
+            request_id = response.headers.get("x-request-id")
             if request_id:
-                request_id = request_id.replace(key, "[REDACTED_API_KEY]")
-            return HTTPResult(response.status, body, request_id)
+                request_id = _redact_response(request_id.encode(), key, proxies).decode()
+            return HTTPResult(response.status, body, request_id), route
+        except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
+            reason = getattr(exc, "reason", exc)
+            if isinstance(reason, TimeoutError):
+                code, message = "MODEL_NETWORK_TIMEOUT", "连接或读取超时；远端执行状态未知，不自动重试。"
+            elif isinstance(reason, ssl.SSLError):
+                code, message = "MODEL_TLS_FAILED", "TLS 验证或握手失败；未关闭验证，不自动重试。"
+            elif proxies:
+                code, message = "MODEL_PROXY_CONNECTION_FAILED", "代理连接或读取失败；未转为直连，不自动重试。"
+            else:
+                code, message = "MODEL_NETWORK_FAILED", "直接网络连接或读取失败；不自动重试。"
+            raise C01Error(code, "MODEL_TRANSPORT", message) from None
         finally:
-            connection.close()
+            if response is not None:
+                response.close()
+
+    def check_model_access(self, model: str) -> dict:
+        """One free metadata GET, using exactly the same network path as send()."""
+        if model != MODEL:
+            raise C01Error("MODEL_NOT_SUPPORTED", "MODEL_TRANSPORT", "不自动替换实验模型。")
+        started = time.monotonic()
+        report = {"model": model, "operation": "MODEL_METADATA_GET", "inference_calls": 0,
+                  "automatic_retries": 0, "http_status": None}
+        try:
+            response, route = self._request("GET", "/v1/models/" + model, None)
+            report.update(http_status=response.status, network_route=route, request_id=response.request_id)
+            try:
+                body = json.loads(response.body)
+            except ValueError:
+                body = None
+            accessible = response.status == 200 and isinstance(body, dict) and body.get("id") == model
+            report["classification"] = "MODEL_METADATA_ACCESSIBLE" if accessible else "MODEL_ACCESS_NOT_CONFIRMED"
+            if not accessible:
+                report["error"] = {"code": "MODEL_METADATA_HTTP_ERROR", "stage": "MODEL_TRANSPORT",
+                                   "message": "已收到 HTTP 响应，未确认指定模型可访问；没有重试。"}
+        except C01Error as exc:
+            report["classification"] = "MODEL_ACCESS_NOT_CONFIRMED"
+            report["error"] = exc.record()
+        report["elapsed_s"] = round(time.monotonic() - started, 4)
+        return report
 
 
 def parse_response(raw: dict, model: str) -> dict:

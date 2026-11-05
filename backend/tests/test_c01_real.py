@@ -280,20 +280,41 @@ def test_transport_serializes_one_post_and_redacts_key_without_network(monkeypat
     key = "offline-not-a-real-key"
     monkeypatch.setenv("OPENAI_API_KEY", key)
     calls = []
-    class Connection:
-        def __init__(self, host, timeout): assert host == "api.openai.com" and timeout == 60
-        def request(self, method, path, body, headers):
-            calls.append((method, path, body))
-            assert headers["Authorization"] == "Bearer " + key
-        def getresponse(self): return self
+    class Response:
         status = 401
+        headers = {"x-request-id": "req-offline"}
         def read(self, limit): return json.dumps({"error": key}).encode()
-        def getheader(self, name): return "req-offline"
         def close(self): pass
-    monkeypatch.setattr("http.client.HTTPSConnection", Connection)
+    class Opener:
+        def open(self, request, timeout):
+            assert timeout == 60 and request.get_header("Authorization") == "Bearer " + key
+            calls.append((request.get_method(), request.selector, request.data))
+            return Response()
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: Opener())
     response = OpenAIResponsesTransport().send(b'{"model":"offline"}')
     assert calls == [("POST", "/v1/responses", b'{"model":"offline"}')]
     assert key not in response.body.decode() and "REDACTED_API_KEY" in response.body.decode()
+
+
+@pytest.mark.parametrize("status,expected", [(429, "FAILED"), (503, "OUTCOME_UNKNOWN")])
+def test_urllib_http_error_is_saved_by_existing_evidence_without_retry(experiment, monkeypatch, status, expected):
+    import urllib.error
+    real, snap, _ = experiment
+    raw = b'{"error":{"message":"explicit offline HTTP error"}}'
+    calls = []
+    class Opener:
+        def open(self, request, timeout):
+            calls.append(request.data)
+            raise urllib.error.HTTPError(request.full_url, status, "offline error", {}, BytesIO(raw))
+    class OfflineHTTPTransport(OpenAIResponsesTransport):
+        label = "OFFLINE_TRANSPORT_TEST"
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: Opener())
+    operation = uuid4(); adapter = OfflineHTTPTransport()
+    result = run(real, snap, adapter, operation)
+    assert result["status"] == expected and result["response_http_status"] == status
+    assert result["raw_response_text"].encode() == raw and result["error"]["code"] == "MODEL_HTTP_ERROR"
+    assert result["actual_model_response"] is None and result["model_api_call_attempted"] is False
+    assert run(real, snap, adapter, operation) == result and len(calls) == 1
 
 
 def test_cli_preflight_has_no_network_or_credential_requirement(experiment, monkeypatch, capsys):

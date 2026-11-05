@@ -41,7 +41,7 @@ Ctrl+C 分别停止本轮前后端。Python 修改后显式重启；不使用自
 
 ## 配置及运行数据
 
-[.env.example](.env.example) 只有示例，不含凭据。普通后端启动读取进程环境；C01 的 credential-status / preflight-real / run-real 命令在开发入口校验后，仅显式加载后端私有凭证文件，见下文。
+[.env.example](.env.example) 只有示例，不含凭据。普通后端启动读取进程环境；C01 的 credential-status / check-model-access / preflight-real / run-real 命令在开发入口校验后，仅显式加载后端私有凭证文件，见下文。
 
 | 配置 | 默认值 / 用途 |
 |---|---|
@@ -254,7 +254,7 @@ S02 不能证明模型会关注图片、遵守 Prompt 或产生正确商品理�
 仅接入 OpenAI Responses：`https://api.openai.com/v1/responses`。候选显式模型 `gpt-4.1-mini-2025-04-14`，
 [官方模型页](https://developers.openai.com/api/docs/models/gpt-4.1-mini)列明图片输入、Responses 和结构化输出。
 这是一次受限 C01 实验的候选，不代表账户已获访问权限、最新或最优模型；没有自动模型替换。
-直接使用 Python 标准库 HTTPS 单次 POST，不新增 SDK 或依赖，没有 SDK 隐式重试、重定向、代理、批量、工具或额外上传调用。
+使用 Python 标准库 urllib HTTPS 单次 POST，不新增 SDK 或依赖；显式使用环境代理，没有自动重试、重定向、批量、工具或额外上传调用。
 拒绝设置了 `OPENAI_BASE_URL` 的真实执行，避免把官方端点与其他供应商混同。
 
 固定使用 S02 Snapshot `8a72fce2-f08d-4a69-8f94-fb3ccc11a664`，
@@ -370,3 +370,30 @@ preflight-real 仍可展示四层原文和图片来源，但省略 Base64。日�
 将 `gpt-4.1-mini-2025-04-14` 标为 Deprecated，关闭日期为 2027-01-14，官方替代候选为 `gpt-6-luna`。
 本实验保持固定快照，不自动切换；模型元数据 GET 可访问也不等于 Responses、图片及 Structured Outputs 推理已验证。
 真实 C01 仍须用户明确确认固定模型、一次调用及预估最高 USD 0.02；估算守卫不保证供应商最终账单的绝对上限。
+
+### P01-03：代理感知的正式模型传输
+
+原 `http.client.HTTPSConnection` 不读取代理环境变量，导致本机绕过既有 HTTPS 代理并在直连 TCP 阶段超时。
+现在 `OpenAIResponsesTransport.send()` 与 `check_model_access()` 共用 `_request()`，使用 urllib 的同一 HTTPS 客户端、TLS 默认验证和 60 秒 socket 超时。
+四层 Prompt、原始请求 JSON bytes、图片、输出 Schema、Snapshot 和 Run/Evidence 语义均不改变。
+
+- 使用进程的 `HTTPS_PROXY`，否则使用 `ALL_PROXY`；同名小写变量按标准库规则优先。HTTPS 目标不使用单独的 HTTP_PROXY。
+- 遵守 `NO_PROXY` / `no_proxy`，匹配时明确直连。没有 HTTPS/ALL 代理时也明确直连；不隐式读取系统代理设置。
+- 当前最小实现支持 `http://` 代理上的 HTTPS CONNECT，含必要代理认证；认证头仅交给 CONNECT，不转发给 API。
+- 不支持 `https://` 代理端点的双层 TLS 或 SOCKS URL。若它们是选中的唯一配置则明确拒绝，不降级、不静默转直连；现有 `HTTPS_PROXY=http://...` 路径可直接复用。
+- 代理连接失败、超时、TLS 验证失败使用不含凭证或代理 URL 的固定错误；不增加代理故障后的直连尝试。
+- API 目标固定为官方域名，只允许既有 Responses POST 和指定模型元数据 GET；禁用所有重定向，含同域重定向。
+- 保留 HTTP 错误状态及脱敏原始响应，交给现有 Evidence 保存；网络结果未知仍由原逻辑记 OUTCOME_UNKNOWN。没有自动 POST 重试或认证重试。
+- 不输出 Key、代理用户名/密码、Proxy-Authorization 或 Base64 图片；响应回显凭证时脱敏。
+
+无付费模型访问检查（不要求开启真实执行、不访问业务数据库、不创建 Run）：
+
+```bash
+env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 \
+  backend/.venv/bin/python -m aigc_workbench.c01_cli check-model-access \
+  --model gpt-4.1-mini-2025-04-14
+```
+
+每次显式命令仅一次 GET；输出实际 HTTP 状态、所选路由类别、耗时及脱敏错误。只有 HTTP 200 且模型 ID 匹配才标 MODEL_METADATA_ACCESSIBLE。
+此结果不等于 Responses POST、图像理解、Token 额度或 C01 AI EVALUATED 已验证。
+原 preflight-real / run-real 命令及付费授权要求保持不变；本轮不执行 Responses POST。

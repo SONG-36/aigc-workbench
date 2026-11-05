@@ -13,6 +13,7 @@ from .c01_persistence import C01EvidenceStore
 from .c01_prompt import readable_request
 from .c01_real import C01RealService, preflight_report
 from .c01_model_store import C01ModelStore
+from .c01_model import OpenAIResponsesTransport
 from .config import CredentialConfigError, Settings, load_openai_credentials
 from .file_storage import LocalImageFiles
 from .persistence import SQLiteTaskStore
@@ -47,6 +48,8 @@ def parser() -> argparse.ArgumentParser:
     model_run = commands.add_parser("inspect-model-run")
     model_run.add_argument("--run-id", type=UUID, required=True)
     commands.add_parser("credential-status")
+    model_access = commands.add_parser("check-model-access")
+    model_access.add_argument("--model", required=True)
     return cli
 
 
@@ -55,11 +58,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         settings = Settings.from_environment()
         require_development(settings)  # Check before DB access, migration or directory creation.
-        if args.command in {"credential-status", "preflight-real", "run-real"}:
+        if args.command in {"credential-status", "preflight-real", "run-real", "check-model-access"}:
             key_status = load_openai_credentials()
             if args.command == "credential-status":
                 print(key_status)
                 return 0 if key_status == "KEY_CONFIGURED" else 2
+            if args.command == "check-model-access":
+                result = OpenAIResponsesTransport().check_model_access(args.model)
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0 if result["classification"] == "MODEL_METADATA_ACCESSIBLE" else 2
         if not settings.database_path.is_file():
             raise C01Error("BUSINESS_DATABASE_MISSING", "SOURCE_SELECTION", "需要现有 S01 数据库。")
         database = SQLiteTaskStore(settings.database_path)
