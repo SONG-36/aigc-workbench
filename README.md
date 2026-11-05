@@ -397,3 +397,30 @@ env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 \
 每次显式命令仅一次 GET；输出实际 HTTP 状态、所选路由类别、耗时及脱敏错误。只有 HTTP 200 且模型 ID 匹配才标 MODEL_METADATA_ACCESSIBLE。
 此结果不等于 Responses POST、图像理解、Token 额度或 C01 AI EVALUATED 已验证。
 原 preflight-real / run-real 命令及付费授权要求保持不变；本轮不执行 Responses POST。
+
+### C02：Quick-A 当前绑定参考的真实理解
+
+C02 从真实 Task / Slot 的当前参考绑定选择 `marketing_reference`，验证归属、角色、原始字节、SHA-256 及准备/执行时绑定一致性。
+输入只包含这一张参考图；商品图、C01 输出及初步评价、历史人工答案、任务名和图位制作要求不进入本次参考观察 Prompt。
+Quick-A 保持同款同配置运营前提；参考宣称按原图记录，不独立认证为实售商品事实，也不以参考商品外观覆盖实际商品图。
+
+[c02_reference.py](backend/src/aigc_workbench/c02_reference.py) 只增加 C02 的来源选择、有效输入、四层 Prompt、八类结构化输出和校验。
+执行直接复用 `C01RealService.run()` 的单次请求、开发/付费门禁、未知结果处理及幂等语义，复用同一代理客户端和 Evidence。
+物理 SQLite 表及固定图片目录沿用历史 `c01_*` 名称，不新建 Runtime；C02 JSON 明确使用 reference_asset_id、slot_id 和 C02 标签，不把参考伪装成 product_image。旧 C01 Snapshot 和结果不改写。
+输出分为布局层次、参考商品/特写、可见文字、营销宣称、图文符号关系、参数/比较、设计风格、不确定项。输出为待核对模型观察，不写回商品事实或 Pass。
+
+受控开发入口（UUID 替换为真实对象；prepare/preflight 不调用模型）：
+
+```bash
+env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 backend/.venv/bin/python -m aigc_workbench.c01_cli prepare-c02 --task-id TASK_UUID --slot-id SLOT_UUID --reference-asset-id REFERENCE_UUID
+env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 backend/.venv/bin/python -m aigc_workbench.c01_cli preflight-c02 --snapshot-id SNAPSHOT_UUID --model gpt-4.1-mini-2025-04-14
+```
+
+仅在取得指定模型、一次调用及预算明确授权后使用真实命令；同 Operation ID 不重新付费执行，未知结果不换 ID 盲目重试：
+
+```bash
+env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 AIGC_ENABLE_C01_REAL=1 backend/.venv/bin/python -m aigc_workbench.c01_cli run-c02 --snapshot-id SNAPSHOT_UUID --model gpt-4.1-mini-2025-04-14 --max-output-tokens 4096 --operation-id OPERATION_UUID --confirm-paid-call --max-cost-usd 0.02
+```
+
+真实请求、原始响应、结构化结果和复核材料保存在被忽略的 `.runtime/c02-real/` 及运行库，不提交商业图片或凭证。
+C01 初步评价仅作待人工复核的质量记录；后续不得仅凭其不完整组件列表决定保留结构，须回查原始商品图及有效依据。

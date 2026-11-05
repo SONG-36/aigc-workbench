@@ -42,7 +42,7 @@ class C01ModelStore:
                     raise C01Error("MODEL_OPERATION_CONFLICT", "RUN_START", "原操作不能更换快照、模型、参数或传输方式。")
                 return record, False
             record = {
-                "label": "C01 MODEL EXECUTION", "transport_label": transport_label,
+                "label": snapshot["capability"] + " MODEL EXECUTION", "transport_label": transport_label,
                 "run_id": str(uuid4()), "attempt_id": str(uuid4()), "operation_id": str(operation_id),
                 "snapshot_id": snapshot["id"], "snapshot_sha256": fingerprint(snapshot),
                 "status": "RUNNING", "attempt_status": "RUNNING", "started_at": now(), "finished_at": None,
@@ -59,6 +59,9 @@ class C01ModelStore:
                 "business_state_changed": False, "human_evaluation": "NOT_PERFORMED",
                 "note": "RUNNING 只表示未可靠完成，可能进程已结束；禁止自动或盲目重新付费。",
             }
+            if snapshot["capability"] == "C02":
+                record.update(capability="C02", task_id=snapshot["task_id"], slot_id=snapshot["slot_id"],
+                              reference_asset_id=snapshot["reference_asset_id"])
             db.execute("INSERT INTO c01_model_runs VALUES (?,?,?,?,?,?,?,?)",
                        (record["run_id"], record["attempt_id"], str(operation_id), snapshot["id"],
                         request_hash, "RUNNING", canonical(record), fingerprint(record)))

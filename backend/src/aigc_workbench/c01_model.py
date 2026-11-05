@@ -46,15 +46,26 @@ def build_request(snapshot: dict, image: bytes, model: str, max_output_tokens: i
     schema = snapshot["prompt"]["layers"][3]["source"]["schema"]
     if schema != OUTPUT_CONTRACT:
         raise C01Error("OUTPUT_CONTRACT_CHANGED", "MODEL_PREFLIGHT", "快照输出契约与 S02 不一致。")
+    return multimodal_request(snapshot["prompt"]["planned_model_input"]["text"], image,
+                              "image/jpeg", schema, "c01_visual_observation", model, max_output_tokens)
+
+
+def multimodal_request(text: str, image: bytes, media_type: str, schema: dict, schema_name: str,
+                       model: str, max_output_tokens: int) -> dict:
+    """Shared serializer for the two explicit capabilities; no routing or Prompt registry."""
+    if model != MODEL or type(max_output_tokens) is not int or not 256 <= max_output_tokens <= 4096:
+        raise C01Error("MODEL_PARAMETERS_INVALID", "MODEL_PREFLIGHT", "模型或输出上限不受支持。")
+    if media_type not in {"image/jpeg", "image/png", "image/webp"} or not text or not image:
+        raise C01Error("MODEL_INPUT_INVALID", "MODEL_PREFLIGHT", "需要明确文字和已校验的实际图片。")
     return {
         "model": model, "store": False, "stream": False, "service_tier": "default",
         "temperature": 0, "max_output_tokens": max_output_tokens,
         "input": [{"role": "user", "content": [
-            {"type": "input_text", "text": snapshot["prompt"]["planned_model_input"]["text"]},
+            {"type": "input_text", "text": text},
             {"type": "input_image", "detail": "high",
-             "image_url": "data:image/jpeg;base64," + base64.b64encode(image).decode("ascii")},
+             "image_url": "data:" + media_type + ";base64," + base64.b64encode(image).decode("ascii")},
         ]}],
-        "text": {"format": {"type": "json_schema", "name": "c01_visual_observation",
+        "text": {"format": {"type": "json_schema", "name": schema_name,
                             "strict": True, "schema": schema}},
     }
 
@@ -233,7 +244,7 @@ class OpenAIResponsesTransport:
         return report
 
 
-def parse_response(raw: dict, model: str) -> dict:
+def response_object(raw: dict, model: str) -> dict:
     if raw.get("model") != model:
         raise C01Error("RESPONSE_MODEL_MISMATCH", "OUTPUT_PARSE", "响应模型与显式选择不一致。")
     if raw.get("status") != "completed":
@@ -258,13 +269,19 @@ def parse_response(raw: dict, model: str) -> dict:
                 result[key] = value
             return result
         result = json.loads(texts[0], object_pairs_hook=unique_pairs)
-        if not isinstance(result, dict) or set(result) != set(OUTPUT_FIELDS):
-            raise ValueError("six exact fields required")
-        if any(not isinstance(value, list) or any(not isinstance(x, str) for x in value)
-               for value in result.values()):
-            raise ValueError("string arrays required")
+        if not isinstance(result, dict):
+            raise ValueError("object required")
     except (ValueError, TypeError) as exc:
-        raise C01Error("MODEL_OUTPUT_INVALID", "OUTPUT_PARSE", "响应不是六字段 string 数组 JSON。") from exc
+        raise C01Error("MODEL_OUTPUT_INVALID", "OUTPUT_PARSE", "响应不是有效的唯一键 JSON 对象。") from exc
+    return result
+
+
+def parse_response(raw: dict, model: str) -> dict:
+    result = response_object(raw, model)
+    if (set(result) != set(OUTPUT_FIELDS)
+            or any(not isinstance(value, list) or any(not isinstance(x, str) for x in value)
+                   for value in result.values())):
+        raise C01Error("MODEL_OUTPUT_INVALID", "OUTPUT_PARSE", "响应不是六字段 string 数组 JSON。")
     return result
 
 

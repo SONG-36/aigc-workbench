@@ -11,6 +11,11 @@ from .file_storage import MAX_UPLOAD_BYTES
 from .persistence import SQLiteTaskStore
 
 
+def snapshot_asset_id(snapshot: dict) -> str:
+    # The existing SQL asset_id FK is role-neutral; preserve old C01 JSON unchanged.
+    return snapshot["reference_asset_id"] if snapshot.get("capability") == "C02" else snapshot["product_asset_id"]
+
+
 class C01EvidenceStore:
     def __init__(self, database: SQLiteTaskStore, data_dir: Path):
         self.database = database
@@ -27,7 +32,7 @@ class C01EvidenceStore:
             db.execute(
                 """INSERT INTO c01_snapshots
                    (id,task_id,asset_id,created_at,body_json,body_sha256) VALUES (?,?,?,?,?,?)""",
-                (str(snapshot_id), snapshot["task_id"], snapshot["product_asset_id"],
+                (str(snapshot_id), snapshot["task_id"], snapshot_asset_id(snapshot),
                  snapshot["created_at"], canonical(snapshot), fingerprint(snapshot)))
             with target.open("xb") as stream:
                 stream.write(image); stream.flush(); os.fsync(stream.fileno())
@@ -47,7 +52,7 @@ class C01EvidenceStore:
             raise C01Error("SNAPSHOT_NOT_FOUND", "EVIDENCE_QUERY", "Execution Snapshot 不存在。")
         body = json.loads(row["body_json"])
         if (fingerprint(body) != row["body_sha256"] or body["id"] != row["id"]
-                or body["task_id"] != row["task_id"] or body["product_asset_id"] != row["asset_id"]):
+                or body["task_id"] != row["task_id"] or snapshot_asset_id(body) != row["asset_id"]):
             raise C01Error("SNAPSHOT_INTEGRITY_FAILED", "EVIDENCE_QUERY", "快照记录不一致。")
         return body
 

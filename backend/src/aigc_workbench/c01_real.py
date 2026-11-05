@@ -44,6 +44,9 @@ class C01RealService:
                 "actual_model_input": None, "actual_model_response": None,
                 "model_api_call_attempted": False, "network_requests": 0}
 
+    def parse_output(self, raw: dict, model: str) -> dict:
+        return parse_response(raw, model)
+
     def run(self, snapshot_id: UUID, model: str, operation_id: UUID, *, confirmed: bool,
             max_cost_usd: str, max_output_tokens: int = 4096, transport=None) -> dict:
         # No DB migration or Run creation before opt-in, quote, source and credentials checks.
@@ -91,7 +94,7 @@ class C01RealService:
             record["usage_based_cost_estimate"] = usage_cost(raw) if record["model_api_call_attempted"] else None
             if not 200 <= response.status < 300:
                 raise C01Error("MODEL_HTTP_ERROR", "MODEL_TRANSPORT", f"供应商 HTTP {response.status}；不重试。")
-            result = parse_response(raw, model)
+            result = self.parse_output(raw, model)
             record["structured_output"] = {"label": ("AI_DERIVED / NOT HUMAN EVALUATED" if record["model_api_call_attempted"]
                                                        else "OFFLINE_TEST_ONLY"), "content": result}
             record["status"] = "SUCCEEDED"
@@ -119,10 +122,12 @@ def preflight_report(preflight: dict) -> dict:
     report = deepcopy(preflight)
     request = report["request"]
     encoded = request["input"][0]["content"][1]["image_url"]
+    prefix, image_data = encoded.split(",", 1)
     request["input"][0]["content"][1]["image_url"] = (
-        f"data:image/jpeg;base64,<omitted {len(encoded.split(',', 1)[1])} base64 characters>")
+        f"{prefix},<omitted {len(image_data)} base64 characters>")
     report["request_display"] = "BASE64_OMITTED_ONLY; request_sha256 covers full exact JSON body"
     report["snapshot"] = {key: preflight["snapshot"][key]
-                          for key in ("id", "task_id", "product_asset_id", "context_sha256")}
+                          for key in ("id", "capability", "task_id", "slot_id", "product_asset_id",
+                                      "reference_asset_id", "context_sha256") if key in preflight["snapshot"]}
     report["image_source"] = preflight["snapshot"]["prompt"]["planned_model_input"]["images"][0]
     return report
