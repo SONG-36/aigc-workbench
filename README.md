@@ -6,8 +6,9 @@ React 工作台 + FastAPI 模块化单体 + SQLite / 本地原始素材文件。
 - **S01-A ENGINEERING VERIFIED**：Task 演进、V1→V2、Asset/Slot、幂等写入与 R01～R04。
 - **S01-B ENGINEERING VERIFIED**：范围限于本轮实际接通并在桌面浏览器验证的素材上传、图位参考绑定、保存/刷新/重新打开/进程重启恢复。
 - 这不是 BUSINESS ACCEPTED；完整旧 UI、带数据候选、历史版本、修改、Pass / Reject、Inspector 仍未完整视觉验收。
-- **S02 ENGINEERING VERIFIED**：受控 CLI 完成 C01 输入准备、四层 Prompt、快照及测试证据；没有真实 AI 理解或 S03。
-- 不支持真实 AI、生图、图片修改、审核或完整三模式。
+- **S02 ENGINEERING VERIFIED**：受控 CLI 完成 C01 输入准备、四层 Prompt、快照及测试证据。
+- **S03 第一阶段 IMPLEMENTED / OFFLINE VERIFIED**：真实 C01 接口与预检已准备，默认关闭；尚未调用真实模型，NOT AI EVALUATED。
+- 不支持工作台 AI 执行、生图、图片修改、审核或完整三模式。
 - [业务/架构依据](docs/business/)和[实施文档](docs/implementation/)未在本轮重写。
 
 ## 安装与启动
@@ -49,10 +50,12 @@ Ctrl+C 分别停止本轮前后端。Python 修改后显式重启；不使用自
 | `AIGC_API_TARGET` | `http://127.0.0.1:8022`，Vite 服务端代理 |
 | `AIGC_ENV` | `development`；C01 CLI 仅允许该环境 |
 | `AIGC_ENABLE_C01_TESTING` | `0`；显式为 `1` 才能使用 C01 开发 CLI |
+| `AIGC_ENABLE_C01_REAL` | `0`；真实调用的独立开关；还需 CLI 付费确认及预算 |
+| `OPENAI_API_KEY` | 无默认值；仅真实执行需要，安全注入进程环境 |
 
 目录内包含 `workbench.sqlite3`、`staging/<UUID>.part`、`assets/<UUID>`。
 数据库、原始商业素材、备份、验证记录、环境文件、虚拟环境、依赖、缓存及构建产物不纳入 Git。
-没有模型客户端，不需要任何模型凭据，不得将密钥放入 `VITE_*`。
+S02 测试及 S03 离线预检不需要模型凭据；S03 单次 HTTPS 适配器仅访问官方端点，不得将密钥放入 `VITE_*`。
 
 服务只绑定回环地址，校验 Host 和写请求 Origin。没有跨域 CORS 开放，也没有多用户认证或资源授权，不能直接用于运营 Pilot 或公网服务。
 Task/Asset/Slot 的资源归属在服务器校验；这不等同于用户身份认证。
@@ -99,7 +102,7 @@ Task 创建的未确认意图保存在 sessionStorage，刷新后只恢复意图
 
 ## SQLite 升级及文件一致性
 
-启动时显式初始化/迁移：F01/S01 的 V1→V2 新增 task_creations、assets、image_slots；S02 最新版本 V3 追加 C01 快照与执行证据表，不重建或改写原任务表。
+启动时显式初始化/迁移：F01/S01 的 V1→V2 新增 task_creations、assets、image_slots；S02 V3 追加 C01 快照与测试执行证据；S03 V4 只追加 c01_model_runs 及终态保护，不重建或改写原任务表。
 迁移在单一事务中进行，成功才升级 user_version；未知版本拒绝，异常回滚。每次运行期连接启用外键，且使用 `mode=rw`，缺库读取不会隐式建库。
 后续 Schema 变更继续采用顺序迁移、备份和旧数据保留测试；禁止删除数据库代替迁移。
 
@@ -163,11 +166,11 @@ Microsoft Edge 实际上传了商品 JPEG 和营销参考 PNG，保存到原 F01
 ## S02：C01 输入准备与测试证据（开发 CLI）
 
 **S02 ENGINEERING VERIFIED**，限于真实业务来源 → 有效状态 → Context → 四层 Prompt → 不可变 Snapshot → TEST_ONLY Run / Attempt / Evidence。
-**C01 AI EVALUATED：未完成；BUSINESS ACCEPTED：未建立。** 没有真实模型、SDK 请求序列化、生成或 S03 开发。
+**C01 AI EVALUATED：未完成；BUSINESS ACCEPTED：未建立。** S02 本身没有真实模型调用；S03 另见下文。
 
 采用本地 CLI，不新增开发 HTTP API、工作台页面或完整 Inspector。
 入口在任何存储访问前检查 `AIGC_ENV=development` 且 `AIGC_ENABLE_C01_TESTING=1`；默认关闭。生产环境即使开关为 1 也拒绝。
-`.env.example` 不自动加载，以下环境值仅作用于该命令。没有模型凭据或真实模型开关。
+`.env.example` 不自动加载，以下环境值仅作用于该命令。S02 run 始终使用测试适配器，不读取真实模型开关或凭据。
 
 将下列 TASK_UUID / PRODUCT_ASSET_UUID / SNAPSHOT_UUID / OPERATION_UUID / RUN_UUID 替换为实际 UUID：
 ```bash
@@ -239,5 +242,99 @@ Test Adapter 不做图像识别，visual_understanding=null，不生成 AI_DERIV
 迁移前备份在 `.runtime/s02-backups/`；V2→V3 后业务表逐行不变，固定图片与原图字节相等。
 这些本地输出不是已提交的通用样本或业务批准文档。
 
-S03 仍需单独授权模型、预算及真实调用，验证图片序列化、模型输出契约、视觉理解质量、遵循边界和人工评价；
-S02 不能证明模型会关注图片、遵守 Prompt 或产生正确商品理解。
+S02 不能证明模型会关注图片、遵守 Prompt 或产生正确商品理解。S03 当前只准备下述接口，真实调用、理解效果和人工评价仍需后续明确授权。
+
+## S03 第一阶段：真实 C01 接口与请求预检
+
+**IMPLEMENTED / OFFLINE VERIFIED；REAL API NOT EXECUTED / NOT AI EVALUATED / NOT BUSINESS ACCEPTED。**
+本阶段没有付费请求、真实供应商响应或费用账单；离线测试响应不作为商品理解成果。
+
+### 接口、固定输入与费用依据
+
+仅接入 OpenAI Responses：`https://api.openai.com/v1/responses`。候选显式模型 `gpt-4.1-mini-2025-04-14`，
+[官方模型页](https://developers.openai.com/api/docs/models/gpt-4.1-mini)列明图片输入、Responses 和结构化输出。
+这是一次受限 C01 实验的候选，不代表账户已获访问权限、最新或最优模型；没有自动模型替换。
+直接使用 Python 标准库 HTTPS 单次 POST，不新增 SDK 或依赖，没有 SDK 隐式重试、重定向、代理、批量、工具或额外上传调用。
+拒绝设置了 `OPENAI_BASE_URL` 的真实执行，避免把官方端点与其他供应商混同。
+
+固定使用 S02 Snapshot `8a72fce2-f08d-4a69-8f94-fb3ccc11a664`，
+Asset `a452aaca-5bfe-4cb9-8bdb-9bd9bd3e8aa3`，
+JPEG SHA-256 `cf304828c8204114c3a71aa69990d22848378b5a50b9330ad66900c2e0d3e554`。
+原图及固定副本均为 448,920 bytes、1920×1920。预检核对当前 Task 归属/角色、真实文件、固定图片与完整 Snapshot 哈希；
+不匹配就停止，既不重建旧快照，也不加入人工答案。`operator_confirmed_information=[]`。
+
+四层 S02 文字原样作为一个 `input_text`；`input_image.image_url` 实际包含 `data:image/jpeg;base64,...` 的完整原始 JPEG，
+不是只传路径、Asset ID 或 SHA。不重编码图片、不加入营销参考、不添加标准答案。
+`text.format` 使用 Snapshot 原六字段 JSON Schema，`strict=true`、`additionalProperties=false`。
+参数显式为上述模型、`detail=high`、`temperature=0`、`max_output_tokens=4096`、`service_tier=default`、`store=false`、`stream=false`。
+输出上限允许显式收紧至 256～4096；没有 tools。四层模板版本、文字和 Schema 均不改写。
+
+费用依据核对于 2026-11-05：[官方价格](https://developers.openai.com/api/docs/pricing)标准价输入 $0.40 / 百万 tokens、输出 $1.60 / 百万 tokens，
+[图片计费说明](https://developers.openai.com/api/docs/guides/images-vision#calculating-costs)规定该模型按 32px patches、1.62 倍计费。
+预检使用未缩小图片的 patches、文字/Schema UTF-8 bytes 和额外 4096 tokens 余量作保守估算，不扣缓存优惠；
+这不是精确分词、供应商强制扣费上限或实际账单，不含未知税费。`--max-cost-usd` 低于该估算则拒绝。
+价格核对超过七天拒绝真实执行，需先复核。账户权限、额度及真实可用性未调用探测，仍 UNKNOWN。
+用户必须先明确确认具体模型、一次调用及 USD 费用上限；代码开关不能代替该授权。
+
+### 离线预检与后续单次调用
+
+可现在运行，零网络、无需凭证、不迁移数据库、不创建 Run：
+
+```bash
+env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 \
+  backend/.venv/bin/python -m aigc_workbench.c01_cli preflight-real \
+  --snapshot-id 8a72fce2-f08d-4a69-8f94-fb3ccc11a664 \
+  --model gpt-4.1-mini-2025-04-14
+```
+
+输出明确为 `PLANNED MODEL INPUT — OFFLINE PREFLIGHT ONLY`；显示完整文字和图片来源，省略大段 Base64，
+`request_sha256` 覆盖未省略的精确请求 JSON。`actual_model_input/response=null`、`model_api_call_attempted=false`。
+
+**以下仅供用户另行批准模型与一次 USD 0.02 上限后执行，本阶段没有执行。**
+先安全注入 `OPENAI_API_KEY` 到进程环境，不在命令、源码、日志或 VITE 配置中写入密钥。费用估算保护的限制见上文。
+保留以下 operation ID；结果未知时不得换 ID 盲目重试。
+
+```bash
+env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 AIGC_ENABLE_C01_REAL=1 \
+  backend/.venv/bin/python -m aigc_workbench.c01_cli run-real \
+  --snapshot-id 8a72fce2-f08d-4a69-8f94-fb3ccc11a664 \
+  --model gpt-4.1-mini-2025-04-14 --max-output-tokens 4096 \
+  --operation-id 56d3926f-9ab6-4e31-b7cd-63f8043fc0aa \
+  --confirm-paid-call --max-cost-usd 0.02
+```
+
+真实入口同时需要 development、两个显式开关、付费确认、预算、凭证及有效预检。只调用一次，没有自动重试或 fallback。
+同 operation ID 返回原记录，包括 FAILED、OUTCOME_UNKNOWN、RUNNING，不再次调用；更换模型、输入、参数或传输类型产生冲突。
+
+### 结果、Evidence 与失败边界
+
+调用路径：CLI → C01RealService.preflight（复用 S02 Context / Prompt / Snapshot 校验）→ 付费门禁 →
+C01ModelStore 固定 Run / Attempt 和计划请求 → 持久化派发意图 → OpenAIResponsesTransport 单次 POST → 原始响应 / 解析 → 终态 Evidence。
+代码：[c01_real.py](backend/src/aigc_workbench/c01_real.py)、[c01_model.py](backend/src/aigc_workbench/c01_model.py)、
+[c01_model_store.py](backend/src/aigc_workbench/c01_model_store.py)、[c01_cli.py](backend/src/aigc_workbench/c01_cli.py)。
+
+V3→V4 在明确真实执行时追加 `c01_model_runs`：一条记录包含一个 Run、一个 Attempt、固定请求及 Evidence，
+独立于 S02 TEST_ONLY 表，不更新 Task/Asset/Slot 或旧 Snapshot。新应用启动或 S02 写入口也会应用最新顺序迁移。
+真实执行前应按既有 SQLite 纪律备份；本阶段实际预检库仍为 V3，迁移及回滚在临时数据库验证。
+完整请求包含 Base64 图像，属于商业输入，只保存在现有受控本地数据库，不提交 Git。
+计划请求、传输实际输入、真实响应分字段保存；派发意图不证明供应商已经收到请求。
+若进程在派发前后退出，保留 RUNNING / DISPATCH_INTENT_RECORDED、actual_model_input=null，不能从中推导已发送或未发送。
+正常返回时 `actual_model_input` 是交给真实 HTTP 传输的精确请求，不证明供应商内部有效 Prompt 或注意力。
+
+收到 HTTP 响应后保存状态码、可得 request ID、原始响应文本/JSON、耗时、可得 usage；API Key 及 Authorization 头不入 Evidence。
+原始响应中若回显 Key 会被脱敏。`provider_cost=null` 表示没有实际账单；usage_based_cost_estimate 只是按可得 usage 和标准价推算。
+解析要求响应 completed、模型一致、一个 output_text，严格核对六个 string 数组；拒绝、额外/缺失/重复字段、非法 JSON、未完成和 HTTP 错误均保留证据并失败。
+结构化理解标为 AI_DERIVED / NOT HUMAN EVALUATED，不保存成已确认业务事实，不更改业务状态。
+
+超时/连接中断/不完整读取且没有可靠响应，以及 HTTP 408/5xx 时标 `OUTCOME_UNKNOWN`，费用未知，不自动再次付费；60 秒为 socket 超时，不是端到端计时承诺。
+终态证据保存失败则报 `MODEL_EVIDENCE_OUTCOME_UNKNOWN`，保留先前固定请求与派发意图，不返回伪成功、不自动重发。
+查询真实执行（RUN_UUID 替换为返回的真实 Run 身份，不触发调用）：
+
+```bash
+env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 \
+  backend/.venv/bin/python -m aigc_workbench.c01_cli inspect-model-run --run-id RUN_UUID
+```
+
+本阶段离线验证涵盖请求真实编码、四层不变、身份/哈希、门禁、六字段解析、异常、Evidence、幂等不重发及 V3→V4 回滚；
+HTTP 行为使用明确假响应，测试记录标 OFFLINE_TRANSPORT_TEST，不冒充真实理解或供应商 Evidence。
+原 F01/S01/S02 回归保留，仅最新 Schema 版本断言更新为 4。没有真实供应商请求、账户可用性验证、真实 Token Usage、账单或人工视觉评价。

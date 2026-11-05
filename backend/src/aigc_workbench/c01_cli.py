@@ -1,4 +1,4 @@
-"""Opt-in local developer entry. No developer HTTP routes or real-model switch."""
+"""Opt-in local developer CLI. Real requests require a separate explicit paid-call gate."""
 
 import argparse
 import json
@@ -11,13 +11,15 @@ from .c01_context import C01Error
 from .c01_execution import C01Service, require_development
 from .c01_persistence import C01EvidenceStore
 from .c01_prompt import readable_request
+from .c01_real import C01RealService, preflight_report
+from .c01_model_store import C01ModelStore
 from .config import Settings
 from .file_storage import LocalImageFiles
 from .persistence import SQLiteTaskStore
 
 
 def parser() -> argparse.ArgumentParser:
-    cli = argparse.ArgumentParser(description="C01 input preparation and TEST_ONLY execution; no AI calls.")
+    cli = argparse.ArgumentParser(description="C01 developer inspection, test execution and gated real-model experiment.")
     commands = cli.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare")
     prepare.add_argument("--task-id", type=UUID, required=True)
@@ -33,6 +35,17 @@ def parser() -> argparse.ArgumentParser:
     inspect_run.add_argument("--run-id", type=UUID, required=True)
     history = commands.add_parser("history")
     history.add_argument("--task-id", type=UUID, required=True)
+    for command in ("preflight-real", "run-real"):
+        real = commands.add_parser(command)
+        real.add_argument("--snapshot-id", type=UUID, required=True)
+        real.add_argument("--model", required=True)
+        real.add_argument("--max-output-tokens", type=int, default=4096)
+        if command == "run-real":
+            real.add_argument("--operation-id", type=UUID, required=True)
+            real.add_argument("--confirm-paid-call", action="store_true")
+            real.add_argument("--max-cost-usd", required=True)
+    model_run = commands.add_parser("inspect-model-run")
+    model_run.add_argument("--run-id", type=UUID, required=True)
     return cli
 
 
@@ -59,12 +72,23 @@ def main(argv: list[str] | None = None) -> int:
             result = service.run_test(args.snapshot_id, args.operation_id, args.adapter_mode)
         elif args.command == "inspect-run":
             result = service.inspect_run(args.run_id)
+        elif args.command == "preflight-real":
+            result = preflight_report(C01RealService(settings, service).preflight(
+                args.snapshot_id, args.model, args.max_output_tokens))
+        elif args.command == "run-real":
+            result = C01RealService(settings, service).run(
+                args.snapshot_id, args.model, args.operation_id, confirmed=args.confirm_paid_call,
+                max_cost_usd=args.max_cost_usd, max_output_tokens=args.max_output_tokens)
+        elif args.command == "inspect-model-run":
+            result = C01ModelStore(database).inspect(args.run_id)
         else:
             service.tasks.get_draft(args.task_id)
             result = evidence.history(args.task_id)
             result["orphan_snapshot_images"] = evidence.orphan_snapshot_images()
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 1 if args.command == "run" and result["run"]["status"] != "SUCCEEDED" else 0
+        failed = ((args.command == "run" and result["run"]["status"] != "SUCCEEDED")
+                  or (args.command == "run-real" and result["status"] != "SUCCEEDED"))
+        return 1 if failed else 0
     except C01Error as exc:
         print(json.dumps({"error": exc.record()}, ensure_ascii=False), file=sys.stderr)
     except TaskNotFound as exc:

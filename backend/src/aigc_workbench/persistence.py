@@ -90,6 +90,22 @@ for _table in ("c01_runs", "c01_attempts"):
         BEFORE DELETE ON {_table} BEGIN SELECT RAISE(ABORT, 'retain S02 history'); END""")
 
 
+# Separate real-model evidence: the S02 tables and their TEST_ONLY semantics stay intact.
+V4_TABLES = [
+    """CREATE TABLE c01_model_runs (
+        id TEXT PRIMARY KEY NOT NULL, attempt_id TEXT NOT NULL UNIQUE,
+        operation_id TEXT NOT NULL UNIQUE,
+        snapshot_id TEXT NOT NULL REFERENCES c01_snapshots(id), request_sha256 TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('RUNNING','SUCCEEDED','FAILED','OUTCOME_UNKNOWN')),
+        body_json TEXT NOT NULL, body_sha256 TEXT NOT NULL
+    )""",
+    """CREATE TRIGGER c01_model_runs_terminal BEFORE UPDATE ON c01_model_runs
+       WHEN OLD.status != 'RUNNING' BEGIN SELECT RAISE(ABORT, 'terminal C01 model evidence'); END""",
+    """CREATE TRIGGER c01_model_runs_retain BEFORE DELETE ON c01_model_runs
+       BEGIN SELECT RAISE(ABORT, 'retain C01 model evidence'); END""",
+]
+
+
 def asset_from_row(row: sqlite3.Row) -> Asset:
     return Asset(UUID(row["id"]), UUID(row["task_id"]), AssetRole(row["role"]), row["filename"],
                  ImageMetadata(row["sha256"], row["size_bytes"], row["media_type"],
@@ -126,7 +142,7 @@ class SQLiteTaskStore:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("BEGIN IMMEDIATE")
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, 1, 2, 3}:
+            if version not in {0, 1, 2, 3, 4}:
                 raise RuntimeError(f"Unsupported database schema version: {version}")
             if version == 0:
                 connection.execute(V1_TASKS)
@@ -138,6 +154,11 @@ class SQLiteTaskStore:
                 for statement in V3_TABLES:
                     connection.execute(statement)
                 connection.execute("PRAGMA user_version = 3")
+                version = 3
+            if version == 3:
+                for statement in V4_TABLES:
+                    connection.execute(statement)
+                connection.execute("PRAGMA user_version = 4")
             if connection.execute("PRAGMA foreign_key_check").fetchone():
                 raise RuntimeError("Database foreign-key validation failed")
 

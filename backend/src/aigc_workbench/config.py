@@ -15,6 +15,7 @@ class Settings:
     )
     environment: str = "development"
     enable_c01_testing: bool = False
+    enable_c01_real: bool = False
 
     @property
     def database_path(self) -> Path:
@@ -31,4 +32,5 @@ class Settings:
             ).split(",")
         )))
         return cls(path.resolve(), origins, os.environ.get("AIGC_ENV", "development"),
-                   os.environ.get("AIGC_ENABLE_C01_TESTING", "0") == "1")
+                   os.environ.get("AIGC_ENABLE_C01_TESTING", "0") == "1",
+                   os.environ.get("AIGC_ENABLE_C01_REAL", "0") == "1")
