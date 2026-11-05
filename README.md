@@ -424,3 +424,17 @@ env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 AIGC_ENABLE_C01_REAL=1 backen
 
 真实请求、原始响应、结构化结果和复核材料保存在被忽略的 `.runtime/c02-real/` 及运行库，不提交商业图片或凭证。
 C01 初步评价仅作待人工复核的质量记录；后续不得仅凭其不完整组件列表决定保留结构，须回查原始商品图及有效依据。
+
+### 当前主图：一次 C03 / C04 / C05 双图判断
+
+[quick_a_creation_decision.py](backend/src/aigc_workbench/quick_a_creation_decision.py) 仅为当前 Quick-A 主图准备来源对齐和制作决定。
+两张原图按 product_image、marketing_reference 的顺序实际进入同一次多模态请求；C01/C02 原始理解及初评以 AI-derived / 待复核来源身份进入 Context，不替代原图。
+当前绑定、主图尺寸、保存的逐图要求、上游 Run/Snapshot/素材哈希在准备及调用前再次核对；旧记录不覆盖。
+
+仍复用已有单次 Runtime、客户端、代理、凭证加载、Snapshot 和 Evidence；不新建 Agent、Workflow、Prompt Registry 或业务对象。
+本次分段输出为 01_SOURCE_ALIGNMENT、02_IMAGE_CREATION_DECISION；后者包含 C04、C05 及完整 C06 制作输入，状态保持候选、待审核，不自动生成图像或更新 Pass。
+参数守卫保持固定模型；本次两图均计入费用估算，可显式设置 8192 输出 tokens 和 USD 0.05 估算上限。C01/C02 的默认 4096 上限不变。
+
+入口为 prepare-creation-decision（显式 Task/Slot/两张 Asset/两个上游 Run/两份初评）、preflight-creation-decision、run-creation-decision。
+真实命令仍须 development、两个既有显式开关、付费确认、一次操作身份及预算；没有自动重试或模型切换。
+运行产物保存在被忽略的 `.runtime/creation-decision/`，两个可读成果及 C06 输入由真实模型结果导出，不能以人工补写冒充模型输出。

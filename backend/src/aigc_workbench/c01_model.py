@@ -51,19 +51,25 @@ def build_request(snapshot: dict, image: bytes, model: str, max_output_tokens: i
 
 
 def multimodal_request(text: str, image: bytes, media_type: str, schema: dict, schema_name: str,
-                       model: str, max_output_tokens: int) -> dict:
+                       model: str, max_output_tokens: int, *,
+                       additional_images: tuple[tuple[bytes, str], ...] = (), output_ceiling: int = 4096) -> dict:
     """Shared serializer for the two explicit capabilities; no routing or Prompt registry."""
-    if model != MODEL or type(max_output_tokens) is not int or not 256 <= max_output_tokens <= 4096:
+    if (model != MODEL or type(max_output_tokens) is not int or output_ceiling not in {4096, 8192}
+            or not 256 <= max_output_tokens <= output_ceiling or len(additional_images) > 1):
         raise C01Error("MODEL_PARAMETERS_INVALID", "MODEL_PREFLIGHT", "模型或输出上限不受支持。")
     if media_type not in {"image/jpeg", "image/png", "image/webp"} or not text or not image:
         raise C01Error("MODEL_INPUT_INVALID", "MODEL_PREFLIGHT", "需要明确文字和已校验的实际图片。")
+    images = ((image, media_type),) + additional_images
+    if any(not data or mime not in {"image/jpeg", "image/png", "image/webp"} for data, mime in images):
+        raise C01Error("MODEL_INPUT_INVALID", "MODEL_PREFLIGHT", "补充图片输入无效。")
     return {
         "model": model, "store": False, "stream": False, "service_tier": "default",
         "temperature": 0, "max_output_tokens": max_output_tokens,
         "input": [{"role": "user", "content": [
             {"type": "input_text", "text": text},
-            {"type": "input_image", "detail": "high",
-             "image_url": "data:" + media_type + ";base64," + base64.b64encode(image).decode("ascii")},
+            *[{"type": "input_image", "detail": "high",
+               "image_url": "data:" + mime + ";base64," + base64.b64encode(data).decode("ascii")}
+              for data, mime in images],
         ]}],
         "text": {"format": {"type": "json_schema", "name": schema_name,
                             "strict": True, "schema": schema}},
@@ -74,7 +80,8 @@ def estimate_cost(snapshot: dict, request: dict) -> dict:
     """Conservative planning envelope, NOT a provider-enforced billing cap or exact tokenizer."""
     source = snapshot["context"]["capability_specific_inputs"]
     # Use unresized patches: intentionally overestimates when the provider downsizes.
-    image_tokens = ceil(ceil(source["width"] / 32) * ceil(source["height"] / 32) * 1.62)
+    image_tokens = sum(ceil(ceil(item["width"] / 32) * ceil(item["height"] / 32) * 1.62)
+                       for item in snapshot["context"].get("image_inputs", [source]))
     text_bytes = len(request["input"][0]["content"][0]["text"].encode())
     schema_bytes = len(canonical(request["text"]).encode())
     input_envelope = text_bytes + schema_bytes + image_tokens + 4096

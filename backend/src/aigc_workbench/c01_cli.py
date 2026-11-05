@@ -4,6 +4,7 @@ import argparse
 import json
 import sqlite3
 import sys
+from pathlib import Path
 from uuid import UUID
 
 from .application import TaskNotFound, TaskService
@@ -15,6 +16,7 @@ from .c01_real import C01RealService, preflight_report
 from .c01_model_store import C01ModelStore
 from .c01_model import OpenAIResponsesTransport
 from .c02_reference import C02RealService
+from .quick_a_creation_decision import QuickACreationDecisionService
 from .config import CredentialConfigError, Settings, load_openai_credentials
 from .file_storage import LocalImageFiles
 from .persistence import SQLiteTaskStore
@@ -64,6 +66,20 @@ def parser() -> argparse.ArgumentParser:
             c02.add_argument("--operation-id", type=UUID, required=True)
             c02.add_argument("--confirm-paid-call", action="store_true")
             c02.add_argument("--max-cost-usd", required=True)
+    decision = commands.add_parser("prepare-creation-decision")
+    for name in ("task-id", "slot-id", "product-asset-id", "reference-asset-id", "c01-run-id", "c02-run-id"):
+        decision.add_argument("--" + name, type=UUID, required=True)
+    decision.add_argument("--c01-review", type=Path, required=True)
+    decision.add_argument("--c02-review", type=Path, required=True)
+    for command in ("preflight-creation-decision", "run-creation-decision"):
+        decision_run = commands.add_parser(command)
+        decision_run.add_argument("--snapshot-id", type=UUID, required=True)
+        decision_run.add_argument("--model", required=True)
+        decision_run.add_argument("--max-output-tokens", type=int, default=8192)
+        if command == "run-creation-decision":
+            decision_run.add_argument("--operation-id", type=UUID, required=True)
+            decision_run.add_argument("--confirm-paid-call", action="store_true")
+            decision_run.add_argument("--max-cost-usd", required=True)
     return cli
 
 
@@ -73,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
         settings = Settings.from_environment()
         require_development(settings)  # Check before DB access, migration or directory creation.
         if args.command in {"credential-status", "preflight-real", "run-real", "check-model-access",
-                            "preflight-c02", "run-c02"}:
+                            "preflight-c02", "run-c02", "preflight-creation-decision", "run-creation-decision"}:
             key_status = load_openai_credentials()
             if args.command == "credential-status":
                 print(key_status)
@@ -85,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         if not settings.database_path.is_file():
             raise C01Error("BUSINESS_DATABASE_MISSING", "SOURCE_SELECTION", "需要现有 S01 数据库。")
         database = SQLiteTaskStore(settings.database_path)
-        if args.command in {"prepare", "run", "prepare-c02"}:
+        if args.command in {"prepare", "run", "prepare-c02", "prepare-creation-decision"}:
             database.initialize()
         evidence = C01EvidenceStore(database, settings.data_dir)
         service = C01Service(settings, TaskService(database, LocalImageFiles(settings.data_dir)), evidence)
@@ -118,14 +134,25 @@ def main(argv: list[str] | None = None) -> int:
             result = C02RealService(settings, service).run(
                 args.snapshot_id, args.model, args.operation_id, confirmed=args.confirm_paid_call,
                 max_cost_usd=args.max_cost_usd, max_output_tokens=args.max_output_tokens)
+        elif args.command == "prepare-creation-decision":
+            result = QuickACreationDecisionService(settings, service).prepare(
+                args.task_id, args.slot_id, args.product_asset_id, args.reference_asset_id,
+                args.c01_run_id, args.c02_run_id, args.c01_review, args.c02_review)
+        elif args.command == "preflight-creation-decision":
+            result = preflight_report(QuickACreationDecisionService(settings, service).preflight(
+                args.snapshot_id, args.model, args.max_output_tokens))
+        elif args.command == "run-creation-decision":
+            result = QuickACreationDecisionService(settings, service).run(
+                args.snapshot_id, args.model, args.operation_id, confirmed=args.confirm_paid_call,
+                max_cost_usd=args.max_cost_usd, max_output_tokens=args.max_output_tokens)
         else:
             service.tasks.get_draft(args.task_id)
             result = evidence.history(args.task_id)
             result["orphan_snapshot_images"] = evidence.orphan_snapshot_images()
-        output = model_run_report(result) if args.command in {"run-real", "run-c02", "inspect-model-run"} else result
+        output = model_run_report(result) if args.command in {"run-real", "run-c02", "run-creation-decision", "inspect-model-run"} else result
         print(json.dumps(output, ensure_ascii=False, indent=2))
         failed = ((args.command == "run" and result["run"]["status"] != "SUCCEEDED")
-                  or (args.command in {"run-real", "run-c02"} and result["status"] != "SUCCEEDED"))
+                  or (args.command in {"run-real", "run-c02", "run-creation-decision"} and result["status"] != "SUCCEEDED"))
         return 1 if failed else 0
     except CredentialConfigError as exc:
         print(json.dumps({"error": {"code": "CREDENTIAL_CONFIG_INVALID", "stage": "ACCESS",
@@ -146,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
 def model_run_report(record: dict) -> dict:
     """Terminal-safe summary. Full request/images/raw responses remain in persisted Evidence."""
     keys = ("label", "transport_label", "run_id", "attempt_id", "snapshot_id", "requested_model",
-            "capability", "task_id", "slot_id", "reference_asset_id",
+            "capability", "task_id", "slot_id", "reference_asset_id", "product_asset_id",
             "status", "attempt_status", "dispatch_state", "provider_receipt", "model_api_call_attempted",
             "duration_ms", "provider_usage", "provider_cost", "usage_based_cost_estimate")
     result = {key: record[key] for key in keys if key in record}

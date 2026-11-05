@@ -121,13 +121,15 @@ def preflight_report(preflight: dict) -> dict:
     """Readable inspection omits base64 bulk, keeps exact text and reconstructable byte reference."""
     report = deepcopy(preflight)
     request = report["request"]
-    encoded = request["input"][0]["content"][1]["image_url"]
-    prefix, image_data = encoded.split(",", 1)
-    request["input"][0]["content"][1]["image_url"] = (
-        f"{prefix},<omitted {len(image_data)} base64 characters>")
+    for part in request["input"][0]["content"]:
+        if part["type"] == "input_image":
+            prefix, image_data = part["image_url"].split(",", 1)
+            part["image_url"] = f"{prefix},<omitted {len(image_data)} base64 characters>"
     report["request_display"] = "BASE64_OMITTED_ONLY; request_sha256 covers full exact JSON body"
     report["snapshot"] = {key: preflight["snapshot"][key]
                           for key in ("id", "capability", "task_id", "slot_id", "product_asset_id",
                                       "reference_asset_id", "context_sha256") if key in preflight["snapshot"]}
     report["image_source"] = preflight["snapshot"]["prompt"]["planned_model_input"]["images"][0]
+    if len(preflight["snapshot"]["prompt"]["planned_model_input"]["images"]) > 1:
+        report["image_sources"] = preflight["snapshot"]["prompt"]["planned_model_input"]["images"]
     return report

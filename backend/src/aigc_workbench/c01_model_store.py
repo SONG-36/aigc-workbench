@@ -59,9 +59,13 @@ class C01ModelStore:
                 "business_state_changed": False, "human_evaluation": "NOT_PERFORMED",
                 "note": "RUNNING 只表示未可靠完成，可能进程已结束；禁止自动或盲目重新付费。",
             }
-            if snapshot["capability"] == "C02":
-                record.update(capability="C02", task_id=snapshot["task_id"], slot_id=snapshot["slot_id"],
+            if snapshot["capability"] in {"C02", "C03_C04_C05"}:
+                record.update(capability=snapshot["capability"], task_id=snapshot["task_id"], slot_id=snapshot["slot_id"],
                               reference_asset_id=snapshot["reference_asset_id"])
+            if snapshot["capability"] == "C03_C04_C05":
+                record.update(product_asset_id=snapshot["product_asset_id"],
+                              image_sources=snapshot["prompt"]["planned_model_input"]["images"],
+                              upstream_run_ids=snapshot["upstream_run_ids"])
             db.execute("INSERT INTO c01_model_runs VALUES (?,?,?,?,?,?,?,?)",
                        (record["run_id"], record["attempt_id"], str(operation_id), snapshot["id"],
                         request_hash, "RUNNING", canonical(record), fingerprint(record)))
