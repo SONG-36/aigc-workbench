@@ -125,7 +125,7 @@ def test_missing_decision_changed_source_and_unconfirmed_payment_do_not_dispatch
         other=service.service.tasks.create_slot(original['task'],uuid4(),SlotKind.SCENE)
         missing=f"/api/tasks/{original['task']}/slots/{other.id}"
         state=client.get(missing+'/workspace').json()
-        assert not state['readiness']['can_generate'] and '制作决定' in state['readiness']['reason']
+        assert not state['readiness']['can_generate'] and '营销参考' in state['readiness']['reason']
         quote=client.get(path+'/workspace').json()['readiness']['quote_token']
         service.service.tasks.configure_slot(original['task'],original['slot'],original['assets'][1].id,
                                              '1024x1536','changed current requirement')
@@ -150,7 +150,7 @@ def test_restart_never_replays_interrupted_receipts(generation,before):
     wire=SyntheticWire();service,snapshot,_,_=generation;database=service.store.database
     operation=uuid4();t=now()
     with database.connection(write=True) as db:
-        db.execute('INSERT INTO c06_dispatches VALUES (?,?,?,?,?,?,?,?,?,?,NULL)',(
+        db.execute('INSERT INTO c06_dispatches (operation_id,task_id,slot_id,snapshot_id,quote_token,max_cost_usd,state,execution_mode,created_at,updated_at,error_json) VALUES (?,?,?,?,?,?,?,?,?,?,NULL)',(
             str(operation),snapshot['task_id'],snapshot['slot_id'],snapshot['id'],'a'*64,'1.00',before,
             'TEST_SUBSTITUTE',t,t))
     with TestClient(create_app(settings(generation),generation_transport=wire),base_url='http://localhost') as client:
@@ -197,7 +197,7 @@ def test_restart_reconciles_existing_runtime_without_modifying_or_replaying_it(g
         previous,_=service.store.start(snapshot,uuid4(),preflight['request'],preflight['cost'],'1.00','REAL_PROVIDER_TRANSPORT')
     t=now()
     with database.connection(write=True) as db:
-        db.execute('INSERT INTO c06_dispatches VALUES (?,?,?,?,?,?,?,?,?,?,NULL)',(
+        db.execute('INSERT INTO c06_dispatches (operation_id,task_id,slot_id,snapshot_id,quote_token,max_cost_usd,state,execution_mode,created_at,updated_at,error_json) VALUES (?,?,?,?,?,?,?,?,?,?,NULL)',(
             previous['operation_id'],snapshot['task_id'],snapshot['slot_id'],snapshot['id'],'a'*64,'1.00','RUNNING',
             'TEST_SUBSTITUTE',t,t))
     original=service.store.inspect(UUID(previous['run_id']))
@@ -250,7 +250,7 @@ def test_runtime_terminal_error_is_displayed_before_dispatch_callback_finishes(g
     with TestClient(create_app(settings(generation)),base_url='http://localhost') as client:
         t=now()
         with service.store.database.connection(write=True) as db:
-            db.execute('INSERT INTO c06_dispatches VALUES (?,?,?,?,?,?,?,?,?,?,NULL)',(
+            db.execute('INSERT INTO c06_dispatches (operation_id,task_id,slot_id,snapshot_id,quote_token,max_cost_usd,state,execution_mode,created_at,updated_at,error_json) VALUES (?,?,?,?,?,?,?,?,?,?,NULL)',(
                 prior['operation_id'],snapshot['task_id'],snapshot['slot_id'],snapshot['id'],'a'*64,'1.00',
                 'RUNNING','TEST_SUBSTITUTE',t,t))
         body=client.get(route(generation)+'/workspace').json()

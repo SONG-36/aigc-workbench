@@ -8,12 +8,14 @@ from uuid import UUID
 from .application import TaskNotFound
 from .c01_context import C01Error, fingerprint
 from .c01_execution import C01Service
-from .c01_model import authorize
+from .c01_model import authorize, MODEL as UNDERSTANDING_MODEL
 from .c01_model_store import C01ModelStore
 from .c01_persistence import C01EvidenceStore
 from .c06_candidates import CandidateStore
 from .c06_dispatch import C06Dispatcher, ACTIVE
-from .c06_generation import C06Service, MODEL, PARAMETERS
+from .c06_generation import C06Service, MODEL, PARAMETERS, image_parameters
+from .quick_a_sources import current_sources, prepare_creation
+from .quick_a_creation import QuickACreation
 from .config import CredentialConfigError, load_openai_credentials
 from .domain import Conflict
 from .c07_revision import C07Service
@@ -21,8 +23,10 @@ from .image_review import ReviewStore
 
 
 class GenerationApplication:
-    def __init__(self, settings, tasks, database, *, transport=None):
+    def __init__(self, settings, tasks, database, *, transport=None, responses_transport=None):
         self.settings, self.tasks, self.database, self.transport = settings, tasks, database, transport
+        self.responses_transport = responses_transport
+        self.test_mode = transport is not None and transport.label == 'OFFLINE_TRANSPORT_TEST'
         self.candidates = CandidateStore(database, settings.data_dir)
         self.runs = C01ModelStore(database)
         self.reviews = ReviewStore(database, self.candidates, test_mode=transport is not None)
@@ -32,7 +36,7 @@ class GenerationApplication:
 
     def start(self):
         self.dispatcher.start()
-        if self.enabled:
+        if self.enabled and not self.test_mode:
             try:
                 if load_openai_credentials() != "KEY_CONFIGURED":
                     self.access_error = "后端未配置模型凭证。"
@@ -48,17 +52,24 @@ class GenerationApplication:
 
     def _service(self):
         return C06Service(self.settings, C01Service(self.settings, self.tasks,
-                          C01EvidenceStore(self.database, self.settings.data_dir)))
+                          C01EvidenceStore(self.database, self.settings.data_dir)), test_mode=self.test_mode)
 
     def _execute(self, snapshot_id, operation_id, budget):
         snapshot = C01EvidenceStore(self.database, self.settings.data_dir).load_snapshot(snapshot_id)
+        if snapshot['capability'] == 'QUICK_A_CREATION':
+            return QuickACreation(self.settings, self.tasks, self.database, self.dispatcher,
+                responses_transport=self.responses_transport, image_transport=self.transport).execute(snapshot_id, operation_id, budget)
         service = self._revision_service() if snapshot["capability"] == "C07" else self._service()
-        return service.run(snapshot_id, MODEL, operation_id, confirmed=True,
-                                   max_cost_usd=budget, transport=self.transport)
+        self.dispatcher.progress(operation_id, snapshot['capability'], [])
+        result = service.run(snapshot_id, MODEL, operation_id, confirmed=True,
+                             max_cost_usd=budget, transport=self.transport)
+        if result['status'] == 'SUCCEEDED' and result.get('candidate'):
+            self.dispatcher.progress(operation_id, 'REVIEW_PENDING', [])
+        return result
 
     def _revision_service(self):
         return C07Service(self.settings, C01Service(self.settings, self.tasks,
-                         C01EvidenceStore(self.database, self.settings.data_dir)))
+                         C01EvidenceStore(self.database, self.settings.data_dir)), test_mode=self.test_mode)
 
     def _slot(self, task_id, slot_id):
         task = self.tasks.get_draft(task_id)
@@ -68,6 +79,23 @@ class GenerationApplication:
         return task, slot
 
     def _select(self, task_id, slot_id):
+        state, images = current_sources(self._service().service, task_id, slot_id)
+        try:
+            flight = self._select_existing(task_id, slot_id)
+            if flight['snapshot']['product_asset_id'] == state['product_asset_id']:
+                return flight
+        except (C01Error, OSError, ValueError, KeyError, TypeError):
+            # An explicit new operation rebuilds obsolete decisions from current sources;
+            # a GET only offers readiness and never invokes a model.
+            pass
+        if self.transport is not None and self.responses_transport is None:
+            raise C01Error('QUICK_A_TRANSPORT_INCOMPLETE', 'ACCESS', '完整链路测试需同时配置理解与图片测试替身。')
+        return {'kind': 'QUICK_A_CREATION', 'state': state, 'images': images,
+                'models': {'understanding': UNDERSTANDING_MODEL, 'image': MODEL},
+                'request_sha256': fingerprint({'operation': 'CREATE_QUICK_A_CANDIDATE', 'sources': state,
+                    'models': {'understanding': UNDERSTANDING_MODEL, 'image': MODEL}})}
+
+    def _select_existing(self, task_id, slot_id):
         # Discover by persisted business ownership, never by sample UUID or a filesystem glob.
         with self.database.connection() as db:
             rows = db.execute("SELECT id FROM c01_snapshots WHERE task_id=? "
@@ -93,6 +121,9 @@ class GenerationApplication:
         return "UNRESTRICTED_PILOT" if self.settings.environment == "pilot" else "1.00"
 
     def _quote(self, preflight):
+        if preflight.get('kind') == 'QUICK_A_CREATION':
+            return fingerprint({'business_input': preflight['request_sha256'], 'model': MODEL,
+                                'execution_policy': self.budget_policy})
         return fingerprint({"snapshot_id": preflight["snapshot"]["id"],
                             "request_sha256": preflight["request_sha256"],
                             "model": MODEL, "execution_policy": self.budget_policy})
@@ -103,6 +134,8 @@ class GenerationApplication:
                 "product_asset_id", "reference_asset_id", "status", "image", "operator_approved", "pass")
         return {**{key: body[key] for key in keys}, "base_image_version_id": body.get("base_image_version_id"),
                 "revision_text": body.get("revision_text"),
+                "execution_mode": body.get("execution_mode", "REAL"),
+                "not_for_real_delivery": body.get("not_for_real_delivery", False),
                 **{key: body[key] for key in ("requested_output_size", "model_generation_size", "final_output_size", "postprocess")
                    if key in body},
                 "url": f"/api/tasks/{task_id}/slots/{slot_id}/versions/{version_id}/content"}
@@ -160,6 +193,7 @@ class GenerationApplication:
                           "duration_ms": run["duration_ms"] if run else None,
                           "usage": run["provider_usage"] if run else None,
                           "usage_cost_estimate": run["usage_based_cost_estimate"] if run else None,
+                          "progress": json.loads(receipt['progress_json']) if receipt else None,
                           "error": error})
         return sorted(items, key=lambda row: row["created_at"], reverse=True)
 
@@ -186,33 +220,43 @@ class GenerationApplication:
         if self.enabled and self.dispatcher.pool and not self.access_error:
             try:
                 preflight = self._select(task_id, slot_id)
-                authorize(self.settings, True, self.budget_policy, preflight["cost"])  # Offline guard only; no request.
-                snapshot = preflight["snapshot"]
-                readiness.update(can_generate=True, reason="制作决定及来源已核验，可生成一张待审候选。",
-                    parameters=preflight["snapshot"]["parameters"],
-                    quote_token=self._quote(preflight), estimate_usd=preflight["cost"]["planning_envelope_usd"],
-                    decision_snapshot_id=snapshot["decision_snapshot_id"], product_asset_id=snapshot["product_asset_id"],
-                    reference_asset_id=snapshot["reference_asset_id"])
+                if preflight.get('kind') == 'QUICK_A_CREATION':
+                    state = preflight['state']
+                    readiness.update(can_generate=True, reason='将按需理解当前商品与参考、形成制作决定并生成一张待审候选。',
+                        quote_token=self._quote(preflight), parameters=image_parameters(state['output_plan']),
+                        product_asset_id=state['product_asset_id'], reference_asset_id=state['reference_asset_id'],
+                        product_selection=state['product_selection'])
+                else:
+                    self._existing_readiness(preflight, readiness)
             except C01Error as exc:
-                readiness["reason"] = str(exc)
+                readiness['reason'] = str(exc)
             except (OSError, ValueError, KeyError, TypeError):
-                readiness["reason"] = "制作决定或来源记录不可读取，未开放生成。"
+                readiness['reason'] = '当前制作来源不可读取，未开放生成。'
         elif self.access_error:
-            readiness["reason"] = self.access_error
-        active = next((item for item in executions if item["state"] in ACTIVE), None)
+            readiness['reason'] = self.access_error
+        active = next((item for item in executions if item['state'] in ACTIVE), None)
         if active:
-            readiness.update(can_generate=False, reason="本图位有执行中或结果未知的操作；请查询，不要重复付费。")
-        if any(item["error"] and item["error"].get("code") == "CANDIDATE_NOT_SAVED" for item in executions):
-            readiness.update(can_generate=False, reason="已有模型结果待恢复本地候选保存；不要再次付费。")
-        return {"task_id": str(task_id), "slot_id": str(slot_id), "readiness": readiness,
-                "execution_mode": "TEST_SUBSTITUTE" if self.transport is not None else "REAL",
-                "reviews": reviews, "delivery": ({**delivery,
-                    "url": f"/api/tasks/{task_id}/slots/{slot_id}/delivery?review_id={delivery['id']}"} if delivery else None),
-                "can_request_revision": bool(self.enabled and self.dispatcher.pool and not self.access_error and candidates
-                    and not active and os.environ.get("AIGC_ENABLE_C07_REAL") == "1"
-                    and not any(e["error"] and e["error"].get("code") == "CANDIDATE_NOT_SAVED" for e in executions)),
-                "candidates": candidates, "executions": executions,
-                "state": active["state"] if active else executions[0]["state"] if executions else "NOT_STARTED"}
+            readiness.update(can_generate=False, reason='本图位有执行中或结果未知的操作；请查询，不要重复付费。')
+        if any(item['error'] and item['error'].get('code') == 'CANDIDATE_NOT_SAVED' for item in executions):
+            readiness.update(can_generate=False, reason='已有模型结果待恢复本地候选保存；不要再次付费。')
+        return {'task_id': str(task_id), 'slot_id': str(slot_id), 'readiness': readiness,
+                'execution_mode': 'TEST_SUBSTITUTE' if self.transport is not None else 'REAL',
+                'reviews': reviews, 'delivery': ({**delivery,
+                    'url': f'/api/tasks/{task_id}/slots/{slot_id}/delivery?review_id={delivery["id"]}'} if delivery else None),
+                'can_request_revision': bool(self.enabled and self.dispatcher.pool and not self.access_error and candidates
+                    and not active and os.environ.get('AIGC_ENABLE_C07_REAL') == '1'
+                    and not any(e['error'] and e['error'].get('code') == 'CANDIDATE_NOT_SAVED' for e in executions)),
+                'candidates': candidates, 'executions': executions,
+                'state': active['state'] if active else executions[0]['state'] if executions else 'NOT_STARTED'}
+
+    def _existing_readiness(self, preflight, readiness):
+        authorize(self.settings, True, self.budget_policy, preflight["cost"])  # Offline guard only; no request.
+        snapshot = preflight["snapshot"]
+        readiness.update(can_generate=True, reason="制作决定及来源已核验，可生成一张待审候选。",
+            parameters=preflight["snapshot"]["parameters"],
+            quote_token=self._quote(preflight), estimate_usd=preflight["cost"]["planning_envelope_usd"],
+            decision_snapshot_id=snapshot["decision_snapshot_id"], product_asset_id=snapshot["product_asset_id"],
+            reference_asset_id=snapshot["reference_asset_id"])
 
     def submit(self, task_id, slot_id, operation_id, quote_token, max_cost_usd=None):
         max_cost_usd = self.budget_policy if self.settings.environment == "pilot" or max_cost_usd is None else max_cost_usd
@@ -232,9 +276,14 @@ class GenerationApplication:
         preflight = self._select(task_id, slot_id)
         if quote_token != self._quote(preflight) or max_cost_usd != self.budget_policy:
             raise Conflict("制作依据已变化，请刷新并重新核对；未执行。")
-        authorize(self.settings, True, max_cost_usd, preflight["cost"])
-        receipt = self.dispatcher.submit(operation_id, task_id, slot_id, preflight["snapshot"]["id"],
-                                          quote_token, max_cost_usd)
+        if preflight.get('kind') == 'QUICK_A_CREATION':
+            snapshot = prepare_creation(self._service().service, preflight['state'], preflight['images'], preflight['models'])
+        else:
+            authorize(self.settings, True, max_cost_usd, preflight["cost"])
+            snapshot = preflight['snapshot']
+        receipt = self.dispatcher.submit(operation_id, task_id, slot_id, snapshot["id"],
+            quote_token, max_cost_usd, initial_progress={'stage': 'PREPARING', 'steps': []}
+            if preflight.get('kind') == 'QUICK_A_CREATION' else None)
         return {"operation_id": receipt["operation_id"], "state": receipt["state"]}
 
     def revision_quote(self, task_id, slot_id, base_id, revision_text):

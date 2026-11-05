@@ -167,6 +167,8 @@ for _action in ("INSERT", "UPDATE"):
           AND r.task_id=NEW.task_id AND r.slot_id=NEW.slot_id AND r.image_version_id=NEW.image_version_id)
         BEGIN SELECT RAISE(ABORT, 'delivery requires matching explicit Pass'); END""")
 
+V8_TABLES = ["ALTER TABLE c06_dispatches ADD COLUMN progress_json TEXT NOT NULL DEFAULT '{}'"]
+
 
 def asset_from_row(row: sqlite3.Row) -> Asset:
     return Asset(UUID(row["id"]), UUID(row["task_id"]), AssetRole(row["role"]), row["filename"],
@@ -204,7 +206,7 @@ class SQLiteTaskStore:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("BEGIN IMMEDIATE")
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, 1, 2, 3, 4, 5, 6, 7}:
+            if version not in {0, 1, 2, 3, 4, 5, 6, 7, 8}:
                 raise RuntimeError(f"Unsupported database schema version: {version}")
             if version == 0:
                 connection.execute(V1_TASKS)
@@ -236,6 +238,12 @@ class SQLiteTaskStore:
                 for statement in V7_TABLES:
                     connection.execute(statement)
                 connection.execute("PRAGMA user_version = 7")
+                version = 7
+            if version == 7:
+                # Extend the existing durable dispatch, rather than adding another execution system.
+                for statement in V8_TABLES:
+                    connection.execute(statement)
+                connection.execute("PRAGMA user_version = 8")
             if connection.execute("PRAGMA foreign_key_check").fetchone():
                 raise RuntimeError("Database foreign-key validation failed")
 

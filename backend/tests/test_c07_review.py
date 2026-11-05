@@ -176,7 +176,7 @@ def test_v7_additive_migration_rollback_and_no_existing_record_changes(revision,
     import aigc_workbench.persistence as persistence
     _, service, _ = revision; database = service.store.database
     with database.connection(write=True) as db:
-        db.execute('DROP TABLE slot_deliveries'); db.execute('DROP TABLE image_reviews'); db.execute('PRAGMA user_version=6')
+        db.execute('DROP TABLE slot_deliveries'); db.execute('DROP TABLE image_reviews'); db.execute('ALTER TABLE c06_dispatches DROP COLUMN progress_json'); db.execute('PRAGMA user_version=6')
         tables = ['task_drafts','assets','image_slots','c01_snapshots','c01_model_runs','image_versions','c06_dispatches']
         before = {t: [tuple(r) for r in db.execute('SELECT * FROM ' + t)] for t in tables}
     original = persistence.V7_TABLES

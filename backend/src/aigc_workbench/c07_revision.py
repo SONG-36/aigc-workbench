@@ -30,13 +30,17 @@ OUTPUT = "输出一张1024x1536 PNG修改候选。不得添加解释、版本标
 
 def compose(context):
     output = OUTPUT
+    boundaries = BOUNDARIES
+    if context['version'] == 'c07-current-slot-selected-base-v1':
+        boundaries = BOUNDARIES.replace('12V/24V系统兼容与DC3.5V-24V工作范围分开，不为工程车辆追加电压。',
+                                       '保留实际来源中的营销数值和图文对应关系，不创造未经提供的参数。')
     if "output_plan" in context:
         plan = context["output_plan"]
         output = OUTPUT.replace("1024x1536", plan["model_generation_size"])
         if plan["postprocess"] != "NONE":
             output += f"原生方图随后以LANCZOS等比例放大交付至{plan['final_output_size']}；不裁切、不新增商品物理尺寸。"
-    contents = [INSTRUCTION, BOUNDARIES, canonical(context), output]
-    layers = [{"index": i + 1, "name": name, "version": "c07-selected-base-v1", "content": value,
+    contents = [INSTRUCTION, boundaries, canonical(context), output]
+    layers = [{"index": i + 1, "name": name, "version": context['version'], "content": value,
                "content_sha256": sha256(value.encode()).hexdigest()}
               for i, (name, value) in enumerate(zip(LAYER_NAMES, contents))]
     return {"layers": layers, "text": final_text(layers)}
@@ -45,6 +49,8 @@ def compose(context):
 class C07Service(C06Service):
     def _sources(self, task_id, slot_id, base_id):
         base, image = CandidateStore(self.store.database, self.settings.data_dir).read_for_slot(task_id, slot_id, base_id)
+        if base.get('execution_mode') == 'TEST_ONLY' and not self.test_mode:
+            raise C01Error('TEST_REVISION_DISABLED', 'ACCESS', 'TEST_ONLY基础图片不能用于真实运营修改。')
         task = self.service.tasks.get_draft(task_id)
         slot = next((s for s in task.slots if s.id == slot_id), None)
         if task.mode != "quick_a" or slot is None or slot.output_size not in OUTPUT_SIZES or not slot.reference_asset_id:
@@ -96,6 +102,8 @@ class C07Service(C06Service):
                    "effective_constraints": sources["effective_constraints"], "revision_text": revision_text,
                    "revision_source": "EXPLICIT_OPERATOR_REQUEST", "historical_revision_instructions": "NOT_REPLAYED",
                    "business_documents": sources["business_documents"], "output_plan": plan}
+        if root.get('decision_template_version') == 'quick-a-current-slot-decision-v1':
+            context['version'] = 'c07-current-slot-selected-base-v1'
         composition = compose(context)
         snapshot = {"id": str(uuid4()), "created_at": now(), "capability": "C07", "task_id": str(task_id), "slot_id": str(slot_id),
                     "product_asset_id": base["product_asset_id"], "reference_asset_id": sources["image_inputs"][2]["source_asset_id"],

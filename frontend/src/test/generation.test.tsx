@@ -59,6 +59,15 @@ function server(start: SlotWorkspace = initial) {
 }
 
 describe('Workspace candidate review and controlled C06 requests (no paid API)', () => {
+  it.each([['PREPARING', '准备中'], ['C01', '商品理解中'], ['C02', '参考理解中'],
+    ['C03_C04_C05', '制作决定中'], ['C06', '图片生成中'], ['C07', '图片修改中']])('displays persisted %s progress without a POST', async (stage, label) => {
+    const run = { ...execution('RUNNING'), progress: { stage, steps: [] } }
+    const api = server({ ...initial, state: 'RUNNING', executions: [run], readiness: { ...initial.readiness, can_generate: false } })
+    mount()
+    expect(await screen.findByText(label, { selector: '[role=status]' })).toBeInTheDocument()
+    expect(api.posts()).toHaveLength(0)
+  })
+
   it('discloses the native and final resolutions for an upscaled candidate', async () => {
     const square = { ...candidate, image: { ...candidate.image, width: 1536, height: 1536 },
       requested_output_size: '1536x1536', model_generation_size: '1024x1024',

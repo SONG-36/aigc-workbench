@@ -80,6 +80,9 @@ class C01RealService:
         try:
             record["model_api_call_attempted"] = transport.label == "REAL_PROVIDER_TRANSPORT"
             record["actual_model_input"] = deepcopy(preflight["request"]) if record["model_api_call_attempted"] else None
+            if not record['model_api_call_attempted']:
+                record['actual_test_adapter_input'] = {'label': 'ACTUAL TEST ADAPTER INPUT / TEST_ONLY',
+                                                       'request': deepcopy(preflight['request'])}
             record["dispatch_state"] = "CLIENT_TRANSPORT_INVOKED"
             response = transport.send(payload)  # Exactly one invocation; no loop/retry/fallback.
             record["response_http_status"], record["request_id"] = response.status, response.request_id

@@ -87,8 +87,10 @@ class CandidateStore:
             raise C01Error("CANDIDATE_IMAGE_CORRUPT", "CANDIDATE_QUERY", "候选PNG完整性失败。")
         return body
 
-    def save(self, run: dict, snapshot: dict, png: bytes) -> dict:
-        if run["status"] != "SUCCEEDED" or run["transport_label"] != "REAL_PROVIDER_TRANSPORT":
+    def save(self, run: dict, snapshot: dict, png: bytes, *, test_only=False) -> dict:
+        offline = (test_only and run['transport_label'] == 'OFFLINE_TRANSPORT_TEST'
+                   and run['model_api_call_attempted'] is False and run.get('offline_test_response') is not None)
+        if run["status"] != "SUCCEEDED" or not (run["transport_label"] == "REAL_PROVIDER_TRANSPORT" or offline):
             raise C01Error("CANDIDATE_REAL_RUN_REQUIRED", "CANDIDATE_SAVE", "仅真实成功结果可保存业务候选。")
         metadata = inspect_image(png, "image/png")
         plan = snapshot_output_plan(snapshot)
@@ -107,6 +109,9 @@ class CandidateStore:
                 "source_provenance": snapshot["source_provenance"], "image": asdict(metadata),
                 "file": str(target.resolve()), "status": "CANDIDATE_REVIEW_PENDING",
                 "operator_approved": False, "pass": False, "created_at": run["finished_at"] or now()}
+        if offline:
+            body['execution_mode'] = 'TEST_ONLY'
+            body['not_for_real_delivery'] = True
         if snapshot["capability"] == "C07":
             body.update(base_image_version_id=snapshot["base_image_version_id"],
                         revision_text=snapshot["context"]["revision_text"])
@@ -114,7 +119,8 @@ class CandidateStore:
         if "output_plan" in snapshot:
             body.update(plan, native_image=run["structured_output"]["content"]["native_image"])
             if plan["postprocess"] != "NONE":
-                native = base64.b64decode(run["actual_model_response"]["data"][0]["b64_json"], validate=True)
+                response = run['offline_test_response'] if offline else run['actual_model_response']
+                native = base64.b64decode(response["data"][0]["b64_json"], validate=True)
                 if asdict(inspect_image(native, "image/png")) != body["native_image"]:
                     raise C01Error("CANDIDATE_IMAGE_CORRUPT", "CANDIDATE_SAVE", "模型原生PNG与执行证据不一致。")
                 body["native_file"] = str((self.directory / (version_id.hex + ".native.png")).resolve())

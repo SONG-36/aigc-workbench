@@ -93,6 +93,9 @@ OUTPUT_INSTRUCTION = (
 
 
 def compose_decision_prompt(context: dict, snapshot_id: str) -> dict:
+    if context['version'] == 'quick-a-current-slot-decision-v1':
+        from .quick_a_decision_prompt import compose
+        return compose(context, snapshot_id)
     contents = [INSTRUCTION, BOUNDARIES, canonical(context), OUTPUT_INSTRUCTION + canonical(OUTPUT_CONTRACT)]
     layers = [{"index": i + 1, "name": name, "version": VERSION, "content": content,
                "content_sha256": sha256(content.encode()).hexdigest(),
@@ -110,6 +113,10 @@ def compose_decision_prompt(context: dict, snapshot_id: str) -> dict:
 
 
 class QuickACreationDecisionService(C02RealService):
+    def __init__(self, settings, service, *, workspace=False, test_mode=False):
+        super().__init__(settings, service)
+        self.workspace, self.test_mode = workspace, test_mode
+
     def select_sources(self, task_id, slot_id, product_id, reference_id, c01_run_id, c02_run_id):
         selection, reference = self.select_reference(task_id, slot_id, reference_id)
         asset, product = self.service.tasks.read_asset(task_id, product_id)
@@ -117,15 +124,15 @@ class QuickACreationDecisionService(C02RealService):
             raise C01Error("DECISION_PRODUCT_ROLE_INVALID", "SOURCE_SELECTION", "第1张必须为实际商品图。")
         task = self.service.tasks.get_draft(task_id)
         slot = next(item for item in task.slots if item.id == slot_id)
-        if slot.kind.value != "main" or slot.reference_asset_id != reference_id:
+        if (not self.workspace and slot.kind.value != "main") or slot.reference_asset_id != reference_id:
             raise C01Error("DECISION_SLOT_INVALID", "SOURCE_SELECTION", "仅处理当前绑定正确的主图。")
         runs = []
         for identity, capability, image_id, digest in [(c01_run_id, "C01", product_id, sha256(product).hexdigest()),
                                                      (c02_run_id, "C02", reference_id, sha256(reference).hexdigest())]:
             run = self.store.inspect(identity)
             upstream_snapshot = self.service.evidence.load_snapshot(UUID(run["snapshot_id"]))
-            if (run["status"] != "SUCCEEDED" or run["model_api_call_attempted"] is not True
-                    or run["transport_label"] != "REAL_PROVIDER_TRANSPORT"
+            from .quick_a_sources import usable_run
+            if (run["status"] != "SUCCEEDED" or not usable_run(run, self.test_mode)
                     or upstream_snapshot["capability"] != capability or upstream_snapshot["task_id"] != str(task_id)
                     or run["snapshot_sha256"] != fingerprint(upstream_snapshot)
                     or run["image_source"]["source_asset_id"] != str(image_id)
@@ -134,7 +141,8 @@ class QuickACreationDecisionService(C02RealService):
                 raise C01Error("DECISION_UPSTREAM_MISMATCH", "SOURCE_SELECTION", "上游真实结果与当前原图或图位不一致。")
             runs.append({"source_id": capability + "_RESULT", "run_id": str(identity),
                          "snapshot_id": run["snapshot_id"], "evidence_sha256": fingerprint(run),
-                         "status": "AI_DERIVED / NOT CONFIRMED PRODUCT FACTS",
+                         "status": ("TEST_ONLY / NOT PRODUCT FACTS" if run['transport_label'] == 'OFFLINE_TRANSPORT_TEST'
+                                    else "AI_DERIVED / NOT CONFIRMED PRODUCT FACTS"),
                          "result": run["structured_output"]["content"]})
         selection.update(product_asset={"asset_id": str(asset.id), "role": asset.role.value, **asdict(asset.image)},
                          slot_state={"id": str(slot.id), "kind": slot.kind.value,
@@ -143,11 +151,13 @@ class QuickACreationDecisionService(C02RealService):
         return selection, product, reference, runs
 
     def prepare(self, task_id: UUID, slot_id: UUID, product_id: UUID, reference_id: UUID,
-                c01_run_id: UUID, c02_run_id: UUID, c01_review: Path, c02_review: Path) -> dict:
+                c01_run_id: UUID, c02_run_id: UUID, c01_review: Path | None = None, c02_review: Path | None = None) -> dict:
         selection, product, reference, runs = self.select_sources(task_id, slot_id, product_id, reference_id,
                                                                 c01_run_id, c02_run_id)
         reviews = []
         for path, source_id in [(c01_review, "C01_PRELIM_REVIEW"), (c02_review, "C02_PRELIM_REVIEW")]:
+            if path is None and self.workspace:
+                continue  # No human review exists for a new task; never fabricate one.
             body = json.loads(path.read_text())
             if source_id.startswith("C01"):
                 valid = (body.get("c01_run_id") == str(c01_run_id)
@@ -173,6 +183,12 @@ class QuickACreationDecisionService(C02RealService):
                                       "current_user_task": TASK_REQUIREMENTS},
             "business_rules": {"source_id": "BUSINESS_RULES", "documents": rule_sources,
                                "authority": "Quick-A marketing permission; original product appearance protected"}}
+        if self.workspace:
+            from .quick_a_decision_prompt import VERSION as WORKSPACE_VERSION
+            name = 'docs/business/04_IMAGE_CREATION_WORK_METHOD.md'
+            rule_sources.append({'file': name, 'sha256': sha256((self.service.source_root / name).read_bytes()).hexdigest()})
+            context.update(version=WORKSPACE_VERSION,
+                operator_requirements={"persisted_slot_requirement": selection["slot_state"]["requirements"]})
         identity = str(uuid4())
         snapshot = {"id": identity, "created_at": now(), "capability": "C03_C04_C05", "task_id": str(task_id),
                     "slot_id": str(slot_id), "product_asset_id": str(product_id), "reference_asset_id": str(reference_id),
@@ -183,12 +199,17 @@ class QuickACreationDecisionService(C02RealService):
                     "context": context, "context_sha256": fingerprint(context),
                     "prompt": compose_decision_prompt(context, identity), "actual_model_input": None,
                     "input_classification": "PLANNED MODEL INPUT", "model_api_call_attempted": False}
+        if self.workspace:
+            snapshot['effective_state']['operation'] = 'QUICK_A_SLOT_IMAGE_CREATION_DECISION'
         # Existing immutable store freezes the product; reference bytes remain in its existing C02 snapshot.
         return self.service.evidence.save_snapshot(snapshot, product)
 
     def preflight(self, snapshot_id: UUID, model: str, max_output_tokens: int = 8192) -> dict:
         snapshot = self.service.evidence.load_snapshot(snapshot_id)
         context = snapshot["context"]
+        if self.workspace and any(sha256((self.service.source_root / item['file']).read_bytes()).hexdigest() != item['sha256']
+                                  for item in context['business_rules']['documents']):
+            raise C01Error('DECISION_RULES_CHANGED', 'MODEL_PREFLIGHT', '制作决定的业务依据版本已变化，请按当前依据重新制作。')
         if (snapshot.get("capability") != "C03_C04_C05" or fingerprint(context) != snapshot["context_sha256"]
                 or snapshot["prompt"] != compose_decision_prompt(context, str(snapshot_id))):
             raise C01Error("DECISION_SNAPSHOT_INVALID", "MODEL_PREFLIGHT", "双图制作判断快照不一致。")
@@ -201,7 +222,7 @@ class QuickACreationDecisionService(C02RealService):
                 or reference != self.service.evidence.read_snapshot_image(reference_snapshot)):
             raise C01Error("DECISION_SOURCE_CHANGED", "MODEL_PREFLIGHT", "图位、要求、原图或上游输入已变化。")
         request = multimodal_request(snapshot["prompt"]["planned_model_input"]["text"], product,
-            selection["product_asset"]["media_type"], OUTPUT_CONTRACT, "quick_a_creation_decision", model,
+            selection["product_asset"]["media_type"], snapshot['prompt']['output_schema'], "quick_a_creation_decision", model,
             max_output_tokens, additional_images=((reference, selection["reference_asset"]["media_type"]),),
             output_ceiling=8192)
         return {"label": "C03_C04_C05 PLANNED MODEL INPUT / NO REQUEST SENT", "snapshot": snapshot,
@@ -225,3 +246,9 @@ class QuickACreationDecisionService(C02RealService):
         if len(claims) != 4 or {item["claim_id"] for item in claims} != {"mc1", "mc2", "mc3", "mc4"}:
             raise C01Error("DECISION_CLAIM_COVERAGE_INVALID", "OUTPUT_PARSE", "必须逐项记录 mc1～mc4 的采用决定。")
         return result
+
+    def parse_execution_output(self, raw, model, snapshot):
+        if self.workspace:
+            from .quick_a_decision_prompt import parse
+            return parse(raw, model, snapshot)
+        return self.parse_output(raw, model)

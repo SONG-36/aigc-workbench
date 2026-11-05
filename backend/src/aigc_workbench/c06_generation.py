@@ -10,10 +10,10 @@ import os
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from .c01_context import C01Error, fingerprint, now
-from .c01_model import OpenAIResponsesTransport, credential_status
+from .c01_context import C01Error, canonical, fingerprint, now
+from .c01_model import MODEL as UNDERSTANDING_MODEL, OpenAIResponsesTransport, credential_status
 from .c01_real import C01RealService
-from .c06_candidates import CandidateStore
+from .c06_candidates import CandidateStore, private_write
 from .file_storage import inspect_image
 from .source_paths import archived_path
 from .quick_a_creation_decision import QuickACreationDecisionService, compose_decision_prompt
@@ -94,11 +94,78 @@ class OpenAIImageEditsTransport(OpenAIResponsesTransport):
 
 
 class C06Service(C01RealService):
+    def __init__(self, settings, service, *, test_mode=False):
+        super().__init__(settings, service)
+        if test_mode and settings.environment != 'development':
+            raise C01Error('TEST_OUTPUT_DISABLED', 'ACCESS', 'TEST_ONLY输出仅允许隔离的开发环境。')
+        self.test_mode = test_mode
+
+    def prepare_current_decision(self, run):
+        """Derive an immutable execution handoff from the saved current-slot result, not a CLI file."""
+        snapshot = self.service.evidence.load_snapshot(UUID(run['snapshot_id']))
+        from .quick_a_sources import usable_run
+        if (run['status'] != 'SUCCEEDED' or not usable_run(run, self.test_mode)
+                or snapshot['capability'] != 'C03_C04_C05'
+                or snapshot['context']['version'] != 'quick-a-current-slot-decision-v1'
+                or run['snapshot_sha256'] != fingerprint(snapshot)):
+            raise C01Error('CREATION_RESULT_INVALID', 'SOURCE_SELECTION', '制作决定不是本执行模式下的成功结果。')
+        result = run['structured_output']['content']
+        decision = result['02_IMAGE_CREATION_DECISION']
+        directory = self.settings.data_dir / 'creation_decisions' / UUID(snapshot['id']).hex
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        handoff = {key: snapshot[key] for key in ('task_id', 'slot_id')}
+        handoff.update(output_size=snapshot['context']['slot_state']['output_size'], C06_executed=False,
+            status='PROPOSED / REVIEW PENDING / NOT OPERATOR APPROVED',
+            images_in_order=snapshot['context']['image_inputs'], image_creation_decision=decision,
+            decision_run_id=run['run_id'], authority='AI_DERIVED / NO_HUMAN_AMENDMENTS',
+            execution_mode='TEST_ONLY' if self.test_mode else 'REAL')
+        for name, content in {'structured-result.json': canonical(result),
+                              '05_C06_EXECUTION_HANDOFF.json': canonical(handoff),
+                              '05_C06_EXECUTION_HANDOFF.md': decision['C06_creation_input']}.items():
+            path = directory / name
+            data = content.encode()
+            if path.exists() or path.is_symlink():
+                if path.is_symlink() or path.read_bytes() != data:
+                    raise C01Error('C06_HANDOFF_CHANGED', 'SOURCE_SELECTION', '已有制作交接文件不同，未覆盖。')
+            else:
+                private_write(path, data)
+        return self.prepare(UUID(snapshot['id']), directory, MODEL)
+
+    def _current_decision_sources(self, decision_id, directory):
+        from .quick_a_sources import usable_run
+        service = QuickACreationDecisionService(self.settings, self.service, workspace=True, test_mode=self.test_mode)
+        flight = service.preflight(decision_id, UNDERSTANDING_MODEL)
+        snapshot = flight['snapshot']
+        expected = self.settings.data_dir / 'creation_decisions' / decision_id.hex
+        if archived_path(self.settings, directory).resolve() != expected.resolve():
+            raise C01Error('C06_HANDOFF_MISMATCH', 'SOURCE_SELECTION', '当前任务交接位置不一致。')
+        handoff = json.loads((expected / '05_C06_EXECUTION_HANDOFF.json').read_text())
+        run = self.store.inspect(UUID(handoff['decision_run_id']))
+        decision = run['structured_output']['content']['02_IMAGE_CREATION_DECISION']
+        prompt = decision['C06_creation_input']
+        if (run['snapshot_id'] != str(decision_id) or run['snapshot_sha256'] != fingerprint(snapshot)
+                or run['status'] != 'SUCCEEDED' or not usable_run(run, self.test_mode)
+                or handoff['task_id'] != snapshot['task_id'] or handoff['slot_id'] != snapshot['slot_id']
+                or handoff['image_creation_decision'] != decision
+                or handoff['images_in_order'] != snapshot['context']['image_inputs']
+                or handoff['output_size'] != snapshot['context']['slot_state']['output_size']
+                or (expected / '05_C06_EXECUTION_HANDOFF.md').read_text() != prompt
+                or json.loads((expected / 'structured-result.json').read_text()) != run['structured_output']['content']):
+            raise C01Error('C06_HANDOFF_MISMATCH', 'SOURCE_SELECTION', '当前图位制作决定及其真实来源不一致。')
+        sources = [{'file': str((directory / name).resolve()), 'sha256': sha256((expected / name).read_bytes()).hexdigest(),
+                    'authority': 'AI_DERIVED / TEST_ONLY' if self.test_mode else 'ORIGINAL_MODEL_OUTPUT / PROPOSED'}
+                   for name in ('structured-result.json', '05_C06_EXECUTION_HANDOFF.json', '05_C06_EXECUTION_HANDOFF.md')]
+        return {'decision_snapshot': snapshot, 'decision_run_id': run['run_id'], 'sources': sources, 'prompt': prompt,
+                'handoff_directory': str(directory.resolve()), 'slot_state': snapshot['context']['slot_state'],
+                'images': flight['request']['input'][0]['content'][1:]}
+
     def _sources(self, decision_id: UUID, handoff_directory: Path) -> dict:
         # Revalidate the archived C03-C05 decision without rewriting it or its Prompt.
         # Only the current output pixel size may differ; all other source/state checks remain strict.
         decision = QuickACreationDecisionService(self.settings, self.service)
         snapshot = self.service.evidence.load_snapshot(decision_id)
+        if snapshot['context']['version'] == 'quick-a-current-slot-decision-v1':
+            return self._current_decision_sources(decision_id, handoff_directory)
         context = snapshot["context"]
         if (snapshot.get("capability") != "C03_C04_C05" or fingerprint(context) != snapshot["context_sha256"]
                 or snapshot["prompt"] != compose_decision_prompt(context, str(decision_id))):
@@ -171,6 +238,7 @@ class C06Service(C01RealService):
                     "slot_id": old["slot_id"], "product_asset_id": old["product_asset_id"],
                     "reference_asset_id": old["reference_asset_id"], "decision_snapshot_id": str(decision_id),
                     "upstream_run_ids": [sources["decision_run_id"]], "source_provenance": sources["sources"],
+                    "decision_template_version": old['context']['version'],
                     "handoff_directory": sources["handoff_directory"], "context": context,
                     "context_sha256": fingerprint(context),
                     "effective_state": {**old["effective_state"], "slot_state": sources["slot_state"], "output_plan": plan},
@@ -239,10 +307,12 @@ class C06Service(C01RealService):
                            else "需显式启用C06，且本次估算门槛不超过USD1。")
         record = super().run(snapshot_id, model, operation_id, confirmed=confirmed,
                              max_cost_usd=max_cost_usd, transport=transport or OpenAIImageEditsTransport())
-        if record["status"] == "SUCCEEDED" and record["transport_label"] == "REAL_PROVIDER_TRANSPORT":
+        test_output = self.test_mode and record['transport_label'] == 'OFFLINE_TRANSPORT_TEST'
+        if record["status"] == "SUCCEEDED" and (record["transport_label"] == "REAL_PROVIDER_TRANSPORT" or test_output):
             snapshot = self.service.evidence.load_snapshot(snapshot_id)
-            native = png_from_response(record["actual_model_response"])
+            native = png_from_response(record["offline_test_response"] if test_output else record["actual_model_response"])
             final = final_png(native, snapshot_output_plan(snapshot))
-            candidate = CandidateStore(self.store.database, self.settings.data_dir).save(record, snapshot, final)
+            store = CandidateStore(self.store.database, self.settings.data_dir)
+            candidate = store.save(record, snapshot, final, test_only=True) if test_output else store.save(record, snapshot, final)
             return {**record, "candidate": candidate}
         return record

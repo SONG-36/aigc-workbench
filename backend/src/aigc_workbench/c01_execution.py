@@ -50,8 +50,10 @@ class C01Service:
             require_development(settings)
         self.tasks, self.evidence, self.source_root = tasks, evidence, source_root
 
-    def prepare(self, task_id: UUID, asset_id: UUID) -> dict:
+    def prepare(self, task_id: UUID, asset_id: UUID, *, source_reason: str | None = None) -> dict:
         selection, image = select_source(self.tasks, task_id, asset_id)
+        if source_reason:
+            selection["reason"] = source_reason
         try:
             effective = resolve_effective_state(selection)
             context = assemble_context(selection, effective, applicable_rules(self.source_root))

@@ -187,7 +187,7 @@ def test_pilot_restart_classifies_unfinished_dispatch_without_replay(pilot,state
     from aigc_workbench.c01_context import now
     settings,g,service,_=pilot;operation=str(uuid4());stamp=now();wire=SyntheticWire()
     with service.store.database.connection(write=True) as db:
-        db.execute('INSERT INTO c06_dispatches VALUES (?,?,?,?,?,?,?,?,?,?,NULL)',(
+        db.execute('INSERT INTO c06_dispatches (operation_id,task_id,slot_id,snapshot_id,quote_token,max_cost_usd,state,execution_mode,created_at,updated_at,error_json) VALUES (?,?,?,?,?,?,?,?,?,?,NULL)',(
             operation,g[1]['task_id'],g[1]['slot_id'],g[1]['id'],'a'*64,'UNRESTRICTED_PILOT',state,'TEST_SUBSTITUTE',stamp,stamp))
     with client_for(settings,wire) as client:
         view=client.get(route(g)+'/workspace').json()

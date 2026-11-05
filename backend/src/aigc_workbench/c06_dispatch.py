@@ -53,7 +53,7 @@ class C06Dispatcher:
             raise Conflict("同一生图操作不能改变图位、制作依据或费用门槛。")
         return old
 
-    def submit(self, operation_id, task_id, slot_id, snapshot_id, quote_token, budget):
+    def submit(self, operation_id, task_id, slot_id, snapshot_id, quote_token, budget, *, initial_progress=None):
         if not self.pool:
             raise C01Error("GENERATION_WORKER_UNAVAILABLE", "DISPATCH", "生图执行进程不可用；未提交。")
         created = now()
@@ -64,9 +64,11 @@ class C06Dispatcher:
                     return self.replay(operation_id, task_id, slot_id, quote_token, budget)
                 if db.execute("SELECT id FROM c01_model_runs WHERE operation_id=?", (str(operation_id),)).fetchone():
                     raise Conflict("操作身份已用于历史模型执行，不能重新提交为新生图。")
-                db.execute("INSERT INTO c06_dispatches VALUES (?,?,?,?,?,?,'QUEUED',?,?,?,NULL)",
+                db.execute("INSERT INTO c06_dispatches "
+                           "(operation_id,task_id,slot_id,snapshot_id,quote_token,max_cost_usd,state,execution_mode,created_at,updated_at,error_json,progress_json) "
+                           "VALUES (?,?,?,?,?,?,'QUEUED',?,?,?,NULL,?)",
                            tuple(map(str, (operation_id, task_id, slot_id, snapshot_id, quote_token, budget)))
-                           + (self.mode, created, created))
+                           + (self.mode, created, created, canonical(initial_progress or {})))
         except sqlite3.IntegrityError as exc:
             raise Conflict("本图位已有执行中或结果未知的操作；请先查询，不要重复付费。") from exc
         receipt = self.find(operation_id)
@@ -80,6 +82,11 @@ class C06Dispatcher:
         with self.database.connection(write=True) as db:
             db.execute("UPDATE c06_dispatches SET state=?,updated_at=?,error_json=? WHERE operation_id=?",
                        (state, now(), canonical(error) if error else None, receipt["operation_id"]))
+
+    def progress(self, operation_id, stage, steps):
+        with self.database.connection(write=True) as db:
+            db.execute("UPDATE c06_dispatches SET progress_json=?,updated_at=? WHERE operation_id=? AND state='RUNNING'",
+                       (canonical({"stage": stage, "steps": steps}), now(), str(operation_id)))
 
     def _work(self, receipt):
         with self.database.connection(write=True) as db:
@@ -110,6 +117,8 @@ class C06Dispatcher:
                 state, error = "OUTCOME_UNKNOWN", {"code": "EXECUTION_INTERRUPTED", "message": "执行中断，远端结果或费用未知；禁止自动重试。"}
             else:
                 error = run.get("error") or error
+        elif error and error.get("outcome_unknown"):
+            state = "OUTCOME_UNKNOWN"
         elif interrupted and receipt["state"] != "QUEUED":
             state, error = "OUTCOME_UNKNOWN", {"code": "EXECUTION_INTERRUPTED", "message": "派发过程已中断，先核对结果，不自动重试。"}
         else:

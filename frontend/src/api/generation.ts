@@ -8,6 +8,7 @@ export interface Candidate {
   base_image_version_id?: string | null; revision_text?: string | null
   requested_output_size?: string; model_generation_size?: string; final_output_size?: string
   postprocess?: 'NONE' | 'LANCZOS_UPSCALE'
+  execution_mode?: 'REAL' | 'TEST_ONLY'; not_for_real_delivery?: boolean
   review_status?: 'PENDING' | 'PASS' | 'REJECT'; is_current_delivery?: boolean; has_historical_pass?: boolean
   image: { width: number; height: number; size_bytes: number; sha256: string }
 }
@@ -27,6 +28,8 @@ export interface Execution {
   error: { code: string; message: string } | null
   usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number } | null
   usage_cost_estimate?: { usd: string; checked_on: string } | null
+  progress?: { stage?: string; steps?: { capability: string; status: string; reused: boolean;
+    run_id: string | null; attempt_id: string | null; snapshot_id: string; operation_id: string }[] } | null
 }
 export interface SlotWorkspace {
   execution_mode?: 'REAL' | 'TEST_SUBSTITUTE'
@@ -35,6 +38,7 @@ export interface SlotWorkspace {
     can_generate: boolean; reason: string; quote_token: string | null; model: string
     max_cost_usd: string | null; estimate_usd: string | null; decision_snapshot_id: string | null
     product_asset_id: string | null; reference_asset_id: string | null
+    product_selection?: string
   }
   can_request_revision?: boolean; reviews?: ImageReview[]
   delivery?: (ImageReview & { url: string }) | null

@@ -49,6 +49,8 @@ class ReviewStore:
         if not reviewer or len(reviewer) > 80 or len(feedback) > 2000 or decision not in {"PASS", "REJECT"}:
             raise InvalidTask("请填写审核人；审核反馈或决定不符合要求。")
         candidate, _ = self.candidates.read_for_slot(task_id, slot_id, version_id)
+        if candidate.get('execution_mode') == 'TEST_ONLY' and not self.test_mode:
+            raise InvalidTask('TEST_ONLY候选不能作为真实运营审核或交付。')
         source = "TEST_REVIEW" if self.test_mode else "EXPLICIT_OPERATOR"
         intent = {"task_id": str(task_id), "slot_id": str(slot_id), "image_version_id": str(version_id),
                   "decision": decision, "reviewer": reviewer, "feedback": feedback, "source": source,

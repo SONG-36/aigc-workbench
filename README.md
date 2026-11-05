@@ -1,14 +1,14 @@
 # AIGC Workbench
 
 React 工作台 + FastAPI 模块化单体 + SQLite / 本地原始素材文件。
-当前完成 Quick-A Task 的创建、真实商品/营销参考上传、最小图位配置及恢复。
+当前接通 Quick-A 新任务从素材上传、按需理解和制作决定到单图候选，以及指定版本修改、人工审核及恢复。
 
 - **S01-A ENGINEERING VERIFIED**：Task 演进、V1→V2、Asset/Slot、幂等写入与 R01～R04。
 - **S01-B ENGINEERING VERIFIED**：范围限于本轮实际接通并在桌面浏览器验证的素材上传、图位参考绑定、保存/刷新/重新打开/进程重启恢复。
 - 这不是 BUSINESS ACCEPTED；完整旧 UI、带数据候选、历史版本、修改、Pass / Reject、Inspector 仍未完整视觉验收。
 - **S02 ENGINEERING VERIFIED**：受控 CLI 完成 C01 输入准备、四层 Prompt、快照及测试证据。
-- **S03 第一阶段 IMPLEMENTED / OFFLINE VERIFIED**：真实 C01 接口与预检已准备，默认关闭；尚未调用真实模型，NOT AI EVALUATED。
-- 不支持工作台 AI 执行、生图、图片修改、审核或完整三模式。
+- **S03 第一阶段**：固定实验 CLI 和真实 C01 接口继续保留；历史真实调用以 Run/Evidence 为准。本轮 P2-B1 集成仅用隔离测试适配器验证，不新增真实 AI 评价。
+- 当前工作台已接通 Quick-A 单图生成、指定版本修改及人工审核；Quick-B / Listing 仍未开放。下方 S01～S03 实验说明保留其当时范围，当前集成见文末 P2-B1。
 - [业务/架构依据](docs/business/)和[实施文档](docs/implementation/)未在本轮重写。
 
 ## 安装与启动
@@ -66,11 +66,11 @@ Task 是同一个业务身份：Domain 从受限 `TaskDraft` 演进为 `Task`，
 保留 `task_drafts` 表及所有旧 UUID、名称、模式、状态和时间，不复制“正式 Task”。
 
 Quick-A 继续采用实际商品图及同款同配置营销参考，不要求 Listing；业务权限以 [01](docs/business/01_BUSINESS_MODES.md)、[02](docs/business/02_INTENT_AND_CONTEXT_RULES.md)、[04](docs/business/04_IMAGE_CREATION_WORK_METHOD.md) 为准。
-本轮只保存准备资料，不认证商品事实、营销宣称或参考适用性。
+资料保存、模型观察、候选生成和人工审核分别留证；不因上传或模型成功就认证商品事实、营销宣称或运营接受。
 
 `status=draft` 不因上传而变成制作完成。每个 Slot 的 `inputs_ready` 由服务器根据该 Task 的商品素材和已保存营销参考绑定派生。
 `materials_ready` 表示至少一个独立图位基础图片输入齐备，不表示所有图位齐备；未绑定图位不阻断其他图位。
-`can_generate` 始终为 false，图片执行尚未实现，与素材准备状态分开。
+Task DTO 中的 `can_generate=false` 保留准备资料接口兼容性；实际生成条件由图位 `/workspace` 接口的 `readiness.can_generate` 负责，不能从素材齐备状态直接推断。
 
 支持主图、对比图、卖点图、使用场景图的最小创建、参考替换/解除绑定、输出尺寸及逐图要求保存。
 主图和对比图各最多一个，动态类型可多次创建；排序不是身份。
@@ -472,4 +472,36 @@ SQLite V5 仅增加不可变 `image_versions` 记录，候选 PNG 保存在 `.ru
 
 运行数据、商业图片和完整请求/响应仅保留在已忽略的 `.runtime` 及 SQLite 中，不提交 Git。真实生成成功不等于商品结构正确、运营批准或 Pass。
 
-Pilot 生产构建、Mac mini 环境核查、私有配置、launchd、备份/恢复、更新与回滚见 [部署准备说明](deploy/README.md)。本轮仅准备，未安装或部署。上海使用与供应商支持地区不符，尚不能发布真实 OpenAI Pilot。新 Task 的 C01～C05 制作决定仍未从 Workspace 自动接通，无有效决定不会伪造输入生图。
+Pilot 生产构建、Mac mini 环境核查、私有配置、launchd、备份/恢复、更新与回滚见 [部署准备说明](deploy/README.md)。本轮仅准备，未安装或部署。上海使用与供应商支持地区不符，尚不能发布真实 OpenAI Pilot。P2-B1 已接通新 Task 的按需理解和制作决定；缺少有效决定时从当前素材重新准备，不伪造制作输入。
+
+
+### P2-B1：新 Quick-A 任务直接制作
+
+运营在原 Workspace 创建任务、上传商品与参考、绑定图位、选择输出像素尺寸及可选要求后，点击“生成一张候选”即可启动；不需要开发者预先运行 C01～C05 CLI，也不增加完整 Listing、Planning 人工预审或费用审批弹窗。
+
+实际调用路径：`GenerationWorkspace / useSlotGeneration` → `POST generations` → `GenerationApplication.submit` → 既有 `C06Dispatcher` → `QuickACreation.execute` → C01 / C02（按来源条件复用）→ C03/C04/C05 合并制作决定 → C06 → 原 `CandidateStore`。有效制作决定仍可直接复用；变化的来源或要求会使旧依据失效，不能用失效结果继续制作。
+
+- 当前输入使用最新上传的一张商品图，界面明确显示其来源；绑定的参考仅提供 Quick-A 营销与设计依据。早先素材不删除，本轮不做多商品照片融合。
+- C01 复用四层 Prompt，支持已校验 JPEG / PNG / WebP，不再要求新任务匹配历史实验 UUID。固定 S03 CLI 的原实验身份校验仍保留。
+- C02 仍是纯参考观察；C03～C05 使用两张原图、理解结果及本图位有效要求，不带入历史样本颜色、电压或固定 mc1～mc4，也不补造人工初评。
+- C06 直接接收两张原图字节。执行交接由已保存的当前制作决定派生于 `creation_decisions/<snapshot UUID>/`，原始模型结果与派生指令分别保留。
+- SQLite V8 只在既有 `c06_dispatches` 追加 `progress_json`；操作先持久化，阶段的 Snapshot / Run / Attempt 与派生 Operation ID 可追溯。模型请求、原始响应、Usage、费用估算仍在原 `c01_model_runs`。未知结果及进程中断不自动恢复付费执行。
+- 1536×1536 沿用 1024×1024 原生方图 + Pillow LANCZOS 等比例放大，原生和最终 PNG、尺寸及处理方式分别留证，候选关联最终文件。C07 保留选定基础版本及目标像素尺寸，不重放历史修改意见。
+- 正常启动仍默认关闭模型执行。已有服务器私有 Key、代理及 Workspace/C01/C06/C07 开关继续使用；本轮没有付费调用、没有部署。工程测试通过不等于真实 AI 质量或运营接受。
+
+隔离浏览器测试（仅开发机、已有依赖；全程 TEST_ONLY）：
+
+```bash
+backend/.venv/bin/python backend/tests/run_quick_a_test_server.py --data-dir .runtime/p2-b1-test-only --port 8033
+```
+
+另一个终端：
+
+```bash
+cd frontend
+AIGC_API_TARGET=http://127.0.0.1:8033 node_modules/.bin/vite --host 127.0.0.1 --port 8034 --strictPort
+```
+
+访问 `http://127.0.0.1:8034`，上传测试目录中的 `product.png`、`reference.png`。该测试入口显式注入 OFFLINE 适配器、使用无效测试凭证并禁止真实供应商传输；拒绝使用既有未标记目录，不读取 `backend/.env.local`，不作为部署入口。测试候选、审核和下载均标记 TEST_ONLY，正常运营服务拒绝将其审核为真实交付。
+
+回归：`backend/.venv/bin/python -m pytest backend/tests`、`npm --prefix frontend test`、`npm --prefix frontend run build`。测试、截图、数据库和生成文件仅保留在忽略的运行目录，不提交 Git。

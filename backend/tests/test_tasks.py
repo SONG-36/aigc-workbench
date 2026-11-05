@@ -50,7 +50,7 @@ def test_create_query_list_and_new_app_restore_same_record(settings):
     with TestClient(create_app(settings), base_url="http://localhost") as restarted:
         assert restarted.get(f"/api/tasks/{saved['id']}").json() == saved
     with sqlite3.connect(settings.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
         assert connection.execute("SELECT count(*) FROM task_drafts").fetchone()[0] == 1
 
 

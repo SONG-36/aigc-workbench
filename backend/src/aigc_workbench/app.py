@@ -28,7 +28,7 @@ def error(status: int, code: str, message: str, **extra) -> JSONResponse:
     })
 
 
-def create_app(settings: Settings | None = None, *, generation_transport=None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, generation_transport=None, understanding_transport=None) -> FastAPI:
     settings = settings or Settings.from_environment()
     pilot = settings.environment == "pilot"
     networks = pilot_boundary(settings) if pilot else ()
@@ -41,7 +41,7 @@ def create_app(settings: Settings | None = None, *, generation_transport=None) -
         files.initialize()
         app.state.task_service = TaskService(store, files)
         app.state.generation_service = GenerationApplication(settings, app.state.task_service, store,
-                                                              transport=generation_transport)
+                                                              transport=generation_transport, responses_transport=understanding_transport)
         app.state.generation_service.start()
         orphans = app.state.task_service.orphan_files()
         if orphans:

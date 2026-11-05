@@ -9,6 +9,8 @@ const kinds = { main: '主图', comparison: '同类商品对比图', selling_poi
 const labels: Record<ExecutionState, string> = {
   NOT_STARTED: '尚未开始', RUNNING: '执行中', SUCCEEDED: '成功并产生候选', FAILED: '执行失败', OUTCOME_UNKNOWN: '结果未知',
 }
+const phases: Record<string, string> = { PREPARING: '准备中', C01: '商品理解中', C02: '参考理解中',
+  C03_C04_C05: '制作决定中', C06: '图片生成中', C07: '图片修改中', REVIEW_PENDING: '候选待审核' }
 
 function Overlay({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null)
@@ -46,19 +48,23 @@ function SlotOutput({ task, slot, locked, draft, setDraft }: {
   if (!sources[0]) sources[0] = task.assets.find(a => a.role === 'product_image')
   const canGenerate = !!ready?.can_generate && !locked && !submitting && !uncertain && !error
   const latest = data?.executions[0]
+  const progressLabel = data?.state === 'RUNNING' && latest?.progress?.stage ? phases[latest.progress.stage]
+    : data?.state === 'SUCCEEDED' && latest?.progress?.stage === 'REVIEW_PENDING' ? phases.REVIEW_PENDING : null
 
   return <div className="slot-output">
     <div className="output-controls">
       <button className="primary" disabled={!canGenerate} onClick={event => { if (event.detail < 2) void generation.submit() }}>
         {submitting ? '正在提交…' : '生成一张候选'}</button>
-      <div><span role="status" className="pill">{data ? labels[data.state] : '读取服务器状态…'}</span>
+      <div><span role="status" className="pill">{progressLabel || (data ? labels[data.state] : '读取服务器状态…')}</span>
         <p className="muted">{locked ? '有待保存或待核对的输入，请先处理。' : ready?.reason}</p></div>
       <button onClick={generation.refresh}>刷新执行状态</button>
     </div>
     {error && <p role="alert" className="error">{error}</p>}
     {uncertain && <p className="notice">提交结果尚未确认，正在查询服务器；不会自动重发付费请求。</p>}
     {(data?.execution_mode === 'TEST_SUBSTITUTE' || latest?.execution_mode === 'TEST_SUBSTITUTE')
-      && <p className="notice">测试替代工具 · 非真实模型生成</p>}
+      && <p className="notice">TEST_ONLY · 测试替代工具 · 非真实模型生成，不能作为真实运营交付</p>}
+    {ready?.product_selection && <p className="muted">本次生成使用最新上传的商品图片：
+      {task.assets.find(a => a.id === ready.product_asset_id)?.filename}。历史候选的来源单独保留。</p>}
     {latest?.error && <p role="alert" className="error">{latest.error.message}（{latest.error.code}
       {latest.http_status ? ` / HTTP ${latest.http_status}` : ''}）</p>}
     {data && <div className="candidate-workspace">
@@ -77,6 +83,7 @@ function SlotOutput({ task, slot, locked, draft, setDraft }: {
           {candidate.postprocess === 'LANCZOS_UPSCALE' && <p className="notice">
             分辨率放大：模型原生 {candidate.model_generation_size} → 最终 {candidate.final_output_size}（LANCZOS 等比例，无裁切）。</p>}
           <p className="muted">版本 {candidate.image_version_id}</p>
+          {candidate.execution_mode === 'TEST_ONLY' && <p className="notice">TEST_ONLY 候选 · 不可用于真实运营交付</p>}
           {candidate.base_image_version_id && <p className="muted">修改基础 {candidate.base_image_version_id}<br />本轮：{candidate.revision_text}</p>}
           <a href={candidate.url} target="_blank" rel="noreferrer">打开原始 PNG</a>
           <RevisionPanel taskId={task.id} slotId={slot.id} candidate={candidate} data={data} draft={draft} setDraft={setDraft}
@@ -86,8 +93,10 @@ function SlotOutput({ task, slot, locked, draft, setDraft }: {
         </> : <div className="empty">本图位尚无已保存的候选图片。</div>}
         <section className="delivery-panel" aria-label="当前有效交付"><h3>当前有效交付</h3>
           {data.delivery ? <><p>Pass 版本 {data.delivery.image_version_id}</p>
+            {data.delivery.source === 'TEST_REVIEW' && <p className="notice">TEST_ONLY 测试审核，不构成真实运营交付。</p>}
             <p className="muted">{data.delivery.reviewer} · {new Date(data.delivery.reviewed_at).toLocaleString()}</p>
-            <a href={data.delivery.url}>下载当前有效交付 PNG</a></> : <p>尚无人工 Pass；候选不能作为有效交付下载。</p>}
+            <a href={data.delivery.url}>{data.delivery.source === 'TEST_REVIEW' ? '下载 TEST_ONLY 测试 PNG' : '下载当前有效交付 PNG'}</a></>
+            : <p>尚无人工 Pass；候选不能作为有效交付下载。</p>}
         </section>
       </div>
       <aside className="candidate-sources" aria-label="商品与参考来源">
@@ -110,6 +119,8 @@ function SlotOutput({ task, slot, locked, draft, setDraft }: {
         {e.usage && <p className="muted">实际 Usage：输入 {e.usage.input_tokens ?? '未知'}，输出 {e.usage.output_tokens ?? '未知'} tokens。</p>}
         {e.usage_cost_estimate && <p className="muted">用量费用估算 USD {e.usage_cost_estimate.usd}（费率日期 {e.usage_cost_estimate.checked_on}，非最终账单）。</p>}
         {e.error && <p className="error">{e.error.message}（{e.error.code}）</p>}
+        {e.progress?.steps?.map(s => <p className="muted" key={s.capability}>
+          {s.capability} · {s.status}{s.reused ? ' · 复用有效结果' : ''} · Run {s.run_id || '准备中'}</p>)}
       </div>)}
     </details>}
     {viewer && <Overlay title={viewer.title} onClose={() => setViewer(null)}>

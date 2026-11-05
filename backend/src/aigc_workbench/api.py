@@ -164,10 +164,11 @@ def review_image(task_id: UUID, slot_id: UUID, version_id: UUID, body: ReviewIma
 @router.get("/tasks/{task_id}/slots/{slot_id}/delivery")
 def download_delivery(task_id: UUID, slot_id: UUID, review_id: UUID, service: Generation):
     candidate, content = service.delivery(task_id, slot_id, review_id)
+    prefix = 'TEST_ONLY' if candidate.get('execution_mode') == 'TEST_ONLY' else 'quick-a'
     return Response(content, media_type="image/png", headers={
         "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store",
         "ETag": '"' + candidate["image"]["sha256"] + '"',
-        "Content-Disposition": f'attachment; filename="quick-a-{slot_id}-{candidate["image_version_id"]}.png"',
+        "Content-Disposition": f'attachment; filename="{prefix}-{slot_id}-{candidate["image_version_id"]}.png"',
     })
 
 
