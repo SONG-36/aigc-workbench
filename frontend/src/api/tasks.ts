@@ -1,4 +1,5 @@
 import type { AssetRole, ImageSlot, SlotKind, TaskDraft } from '../types'
+import { OUTPUT_SIZES } from '../types'
 
 export class ApiError extends Error {
   constructor(message: string, readonly outcome: 'rejected' | 'unknown') { super(message) }
@@ -35,6 +36,7 @@ function decodeTask(value: unknown): TaskDraft {
       && typeof a.sha256 === 'string' && typeof a.filename === 'string')
     || !t.slots.every(s => s.task_id === t.id && typeof s.id === 'string'
       && ['main', 'comparison', 'selling_point', 'scene'].includes(s.kind)
+      && OUTPUT_SIZES.includes(s.output_size)
       && typeof s.inputs_ready === 'boolean')) {
     throw new ApiError('服务器返回的任务格式不符合当前接口，未应用该状态。', 'unknown')
   }

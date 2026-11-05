@@ -6,6 +6,8 @@ export interface Candidate {
   created_at: string; product_asset_id: string; reference_asset_id: string
   status: 'CANDIDATE_REVIEW_PENDING'; operator_approved: boolean; pass: boolean; url: string
   base_image_version_id?: string | null; revision_text?: string | null
+  requested_output_size?: string; model_generation_size?: string; final_output_size?: string
+  postprocess?: 'NONE' | 'LANCZOS_UPSCALE'
   review_status?: 'PENDING' | 'PASS' | 'REJECT'; is_current_delivery?: boolean; has_historical_pass?: boolean
   image: { width: number; height: number; size_bytes: number; sha256: string }
 }

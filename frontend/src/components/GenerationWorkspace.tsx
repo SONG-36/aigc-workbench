@@ -74,6 +74,8 @@ function SlotOutput({ task, slot, locked, draft, setDraft }: {
             <img src={candidate.url} alt="当前图位的已保存生成候选" /></button>
           <p className="muted">{candidate.review_status || 'PENDING'}{candidate.is_current_delivery ? ' · 当前有效交付' : ''} · {candidate.image.width}×{candidate.image.height} ·
             {new Date(candidate.created_at).toLocaleString()}</p>
+          {candidate.postprocess === 'LANCZOS_UPSCALE' && <p className="notice">
+            分辨率放大：模型原生 {candidate.model_generation_size} → 最终 {candidate.final_output_size}（LANCZOS 等比例，无裁切）。</p>}
           <p className="muted">版本 {candidate.image_version_id}</p>
           {candidate.base_image_version_id && <p className="muted">修改基础 {candidate.base_image_version_id}<br />本轮：{candidate.revision_text}</p>}
           <a href={candidate.url} target="_blank" rel="noreferrer">打开原始 PNG</a>

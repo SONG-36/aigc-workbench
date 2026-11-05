@@ -70,6 +70,10 @@ class C01ModelStore:
             if snapshot["capability"] == "C07":
                 record.update(base_image_version_id=snapshot["base_image_version_id"],
                               revision_text=snapshot["context"]["revision_text"])
+            if snapshot["capability"] in {"C06", "C07"} and "output_plan" in snapshot:
+                # Intent only. Actual native/final image metadata and postprocessing are
+                # recorded in structured_output only after decoding/processing succeeds.
+                record["output_plan"] = snapshot["output_plan"]
             if budget == "UNRESTRICTED_PILOT":
                 record.update(user_max_cost_usd=None, execution_policy="UNRESTRICTED_INTERNAL_PILOT",
                               trigger="EXPLICIT_BUSINESS_COMMAND / UNAUTHENTICATED_OPERATOR")

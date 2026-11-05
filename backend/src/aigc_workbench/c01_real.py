@@ -47,6 +47,9 @@ class C01RealService:
     def parse_output(self, raw: dict, model: str) -> dict:
         return parse_response(raw, model)
 
+    def parse_execution_output(self, raw: dict, model: str, snapshot: dict) -> dict:
+        return self.parse_output(raw, model)
+
     def cost_from_usage(self, raw: dict) -> dict | None:
         return usage_cost(raw)
 
@@ -97,7 +100,7 @@ class C01RealService:
             record["usage_based_cost_estimate"] = self.cost_from_usage(raw) if record["model_api_call_attempted"] else None
             if not 200 <= response.status < 300:
                 raise C01Error("MODEL_HTTP_ERROR", "MODEL_TRANSPORT", f"供应商 HTTP {response.status}；不重试。")
-            result = self.parse_output(raw, model)
+            result = self.parse_execution_output(raw, model, preflight["snapshot"])
             record["structured_output"] = {"label": ("AI_DERIVED / NOT HUMAN EVALUATED" if record["model_api_call_attempted"]
                                                        else "OFFLINE_TEST_ONLY"), "content": result}
             record["status"] = "SUCCEEDED"

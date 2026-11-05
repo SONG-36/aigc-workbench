@@ -59,6 +59,16 @@ function server(start: SlotWorkspace = initial) {
 }
 
 describe('Workspace candidate review and controlled C06 requests (no paid API)', () => {
+  it('discloses the native and final resolutions for an upscaled candidate', async () => {
+    const square = { ...candidate, image: { ...candidate.image, width: 1536, height: 1536 },
+      requested_output_size: '1536x1536', model_generation_size: '1024x1024',
+      final_output_size: '1536x1536', postprocess: 'LANCZOS_UPSCALE' as const }
+    const api = server({ ...initial, state: 'SUCCEEDED', candidates: [square], executions: [execution('SUCCEEDED')] })
+    mount()
+    expect(await screen.findByText(/分辨率放大：模型原生 1024x1024 → 最终 1536x1536/)).toBeInTheDocument()
+    expect(api.posts()).toHaveLength(0)
+  })
+
   it('restores a real-version identity, opens PNG and source previews, and remounts with GET only', async () => {
     const api = server({ ...initial, state: 'SUCCEEDED', candidates: [candidate], executions: [execution('SUCCEEDED')] })
     const first = mount()

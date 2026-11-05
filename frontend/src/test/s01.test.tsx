@@ -35,6 +35,42 @@ beforeEach(() => {
 })
 
 describe('S01 deterministic UI contracts with explicit HTTP mocks', () => {
+  it('saves the square output size and restores it after reopening without generation', async () => {
+    const slot = { id: 'square-slot', task_id: task.id, kind: 'main' as const, position: 0,
+      reference_asset_id: null, output_size: '1024x1536' as const, requirements: '', inputs_ready: false }
+    let saved: TaskDraft = { ...task, slots: [slot] }
+    const fetchMock = vi.fn().mockImplementation((path, options) => {
+      if (options?.method === 'PUT') {
+        const body = JSON.parse(options.body)
+        saved = { ...saved, slots: [{ ...saved.slots[0], ...body }] }
+      }
+      if (path.endsWith('/workspace')) return Promise.resolve(json({
+        task_id: task.id, slot_id: slot.id, state: 'NOT_STARTED', candidates: [], executions: [],
+        readiness: { can_generate: false, reason: '无有效制作决定' },
+      }))
+      return Promise.resolve(json(saved))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const first = mount(`/workspace/${task.id}`)
+    const user = userEvent.setup()
+    await screen.findByTestId('task-id')
+    const select = screen.getByLabelText('输出尺寸')
+    for (const size of ['1024x1536', '1024x1024', '1536x1024']) {
+      expect(screen.getByRole('option', { name: size })).toBeInTheDocument()
+    }
+    expect(screen.getByRole('option', { name: '1536 × 1536（正方形）' })).toBeInTheDocument()
+    await user.selectOptions(select, '1536x1536')
+    expect(await screen.findByText(/1024×1024 原生方图生成/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '保存主图配置' }))
+    expect(await screen.findByText(/图位配置已保存/)).toBeInTheDocument()
+    expect(saved.slots[0].output_size).toBe('1536x1536')
+    first.unmount()
+    mount(`/workspace/${task.id}`)
+    await screen.findByTestId('task-id')
+    expect(screen.getByLabelText('输出尺寸')).toHaveValue('1536x1536')
+    expect(fetchMock.mock.calls.filter(([, o]) => o?.method === 'POST')).toHaveLength(0)
+  })
+
   it.each(['success', 'failure'])('ignores late %s after leaving a submitting page', async result => {
     let resolve!: (response: Response) => void
     let reject!: (error: Error) => void

@@ -1,3 +1,6 @@
+export const OUTPUT_SIZES = ['1024x1536', '1024x1024', '1536x1024', '1536x1536'] as const
+export type OutputSize = typeof OUTPUT_SIZES[number]
+
 export type AssetRole = 'product_image' | 'marketing_reference'
 export type SlotKind = 'main' | 'comparison' | 'selling_point' | 'scene'
 
@@ -21,7 +24,7 @@ export interface ImageSlot {
   kind: SlotKind
   position: number
   reference_asset_id: string | null
-  output_size: string
+  output_size: OutputSize
   requirements: string
   inputs_ready: boolean
 }

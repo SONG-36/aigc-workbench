@@ -10,10 +10,11 @@ from uuid import UUID, uuid4
 
 from .c01_context import C01Error, canonical, fingerprint, now
 from .c01_prompt import LAYER_NAMES, final_text
-from .c06_generation import C06Service, MODEL, PARAMETERS, ENDPOINT, estimate_image_cost
+from .c06_generation import C06Service, MODEL, ENDPOINT, estimate_image_cost, image_parameters
 from .c06_candidates import CandidateStore
 from .domain import AssetRole
 from .source_paths import archived_path
+from .image_sizes import OUTPUT_SIZES, output_plan, snapshot_output_plan
 
 INSTRUCTION = "执行C07单图局部修改。Image 1是运营明确选定的基础图片；只执行本轮目标，其余有效设计、布局和内容尽可能保持。"
 BOUNDARIES = (
@@ -28,7 +29,13 @@ OUTPUT = "输出一张1024x1536 PNG修改候选。不得添加解释、版本标
 
 
 def compose(context):
-    contents = [INSTRUCTION, BOUNDARIES, canonical(context), OUTPUT]
+    output = OUTPUT
+    if "output_plan" in context:
+        plan = context["output_plan"]
+        output = OUTPUT.replace("1024x1536", plan["model_generation_size"])
+        if plan["postprocess"] != "NONE":
+            output += f"原生方图随后以LANCZOS等比例放大交付至{plan['final_output_size']}；不裁切、不新增商品物理尺寸。"
+    contents = [INSTRUCTION, BOUNDARIES, canonical(context), output]
     layers = [{"index": i + 1, "name": name, "version": "c07-selected-base-v1", "content": value,
                "content_sha256": sha256(value.encode()).hexdigest()}
               for i, (name, value) in enumerate(zip(LAYER_NAMES, contents))]
@@ -40,8 +47,8 @@ class C07Service(C06Service):
         base, image = CandidateStore(self.store.database, self.settings.data_dir).read_for_slot(task_id, slot_id, base_id)
         task = self.service.tasks.get_draft(task_id)
         slot = next((s for s in task.slots if s.id == slot_id), None)
-        if task.mode != "quick_a" or slot is None or slot.output_size != "1024x1536" or not slot.reference_asset_id:
-            raise C01Error("REVISION_SLOT_UNSUPPORTED", "SOURCE_SELECTION", "本轮修改需要当前Quick-A图位、有效参考及1024x1536尺寸。")
+        if task.mode != "quick_a" or slot is None or slot.output_size not in OUTPUT_SIZES or not slot.reference_asset_id:
+            raise C01Error("REVISION_SLOT_UNSUPPORTED", "SOURCE_SELECTION", "本轮修改需要当前Quick-A图位、有效参考及受支持的输出像素尺寸。")
         product, product_bytes = self.service.tasks.read_asset(task_id, UUID(base["product_asset_id"]))
         reference, reference_bytes = self.service.tasks.read_asset(task_id, slot.reference_asset_id)
         if product.role != AssetRole.PRODUCT_IMAGE or reference.role != AssetRole.MARKETING_REFERENCE:
@@ -82,19 +89,20 @@ class C07Service(C06Service):
             raise C01Error("REVISION_TEXT_INVALID", "CONTEXT_ASSEMBLY", "需要1至2000字符的本轮修改意见。")
         sources = self._sources(task_id, slot_id, base_id)
         base, root = sources["base"], sources["root"]
+        plan = output_plan(sources["effective_constraints"]["current_slot_size"])
         context = {"version": "c07-selected-base-v1", "business_source": {"task_id": str(task_id), "slot_id": str(slot_id), "mode": "quick_a"},
                    "base_image_version_id": str(base_id), "base_run_id": base["run_id"],
                    "image_inputs": sources["image_inputs"], "capability_specific_inputs": sources["image_inputs"][0],
                    "effective_constraints": sources["effective_constraints"], "revision_text": revision_text,
                    "revision_source": "EXPLICIT_OPERATOR_REQUEST", "historical_revision_instructions": "NOT_REPLAYED",
-                   "business_documents": sources["business_documents"]}
+                   "business_documents": sources["business_documents"], "output_plan": plan}
         composition = compose(context)
         snapshot = {"id": str(uuid4()), "created_at": now(), "capability": "C07", "task_id": str(task_id), "slot_id": str(slot_id),
                     "product_asset_id": base["product_asset_id"], "reference_asset_id": sources["image_inputs"][2]["source_asset_id"],
                     "base_image_version_id": str(base_id), "root_c06_snapshot_id": sources["root_id"],
                     "decision_snapshot_id": root["decision_snapshot_id"], "upstream_run_ids": [base["run_id"]],
                     "source_provenance": sources["source_provenance"], "context": context, "context_sha256": fingerprint(context),
-                    "parameters": PARAMETERS, "prompt": {"layers": composition["layers"], "planned_model_input": {
+                    "parameters": image_parameters(plan), "output_plan": plan, "prompt": {"layers": composition["layers"], "planned_model_input": {
                         "label": "PLANNED MODEL INPUT", "text": composition["text"], "images": sources["image_inputs"]}},
                     "actual_model_input": None, "model_api_call_attempted": False,
                     "effective_state": {"operation": "REVISION_OF_EXPLICIT_BASE", "base_image_version_id": str(base_id),
@@ -106,7 +114,10 @@ class C07Service(C06Service):
     def preflight(self, snapshot_id: UUID, model: str, max_output_tokens: int = 4096):
         snapshot = self.service.evidence.load_snapshot(snapshot_id)
         context = snapshot["context"]
-        if (snapshot.get("capability") != "C07" or model != MODEL or snapshot["parameters"] != PARAMETERS
+        plan = snapshot_output_plan(snapshot)
+        if (snapshot.get("capability") != "C07" or model != MODEL or snapshot["parameters"] != image_parameters(plan)
+                or context.get("output_plan", plan) != plan
+                or context["effective_constraints"]["current_slot_size"] != plan["requested_output_size"]
                 or fingerprint(context) != snapshot["context_sha256"]
                 or compose(context)["text"] != snapshot["prompt"]["planned_model_input"]["text"]):
             raise C01Error("REVISION_SNAPSHOT_INVALID", "MODEL_PREFLIGHT", "C07快照、指令或模型不一致。")
@@ -118,9 +129,9 @@ class C07Service(C06Service):
             raise C01Error("REVISION_SOURCE_CHANGED", "MODEL_PREFLIGHT", "基础图片或当前有效约束已变化，请重新核对；未调用。")
         images = [{"image_url": "data:" + item["media_type"] + ";base64," + base64.b64encode(data).decode()}
                   for item, data in zip(sources["image_inputs"], sources["bytes"])]
-        request = {**PARAMETERS, "prompt": snapshot["prompt"]["planned_model_input"]["text"], "images": images}
+        request = {**image_parameters(plan), "prompt": snapshot["prompt"]["planned_model_input"]["text"], "images": images}
         return {"snapshot": snapshot, "request": request, "request_sha256": fingerprint(request), "endpoint": ENDPOINT,
-                "cost": estimate_image_cost(request["prompt"], image_count=3), "network_requests": 0}
+                "cost": estimate_image_cost(request["prompt"], image_count=3, model_size=request["size"]), "network_requests": 0}
 
     def run(self, *args, **kwargs):
         if os.environ.get("AIGC_ENABLE_C07_REAL") != "1":

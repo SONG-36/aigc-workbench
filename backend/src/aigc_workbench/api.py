@@ -10,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import ClientDisconnect
 
 from .application import TaskService
-from .domain import Asset, AssetRole, SlotKind, Task
+from .domain import Asset, AssetRole, SlotKind, Task, OutputSize
 from .file_storage import MAX_UPLOAD_BYTES
 from .generation_application import GenerationApplication
 
@@ -32,7 +32,7 @@ class CreateSlotRequest(BaseModel):
 class ConfigureSlotRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reference_asset_id: UUID | None
-    output_size: Literal["1024x1536", "1024x1024", "1536x1024"]
+    output_size: OutputSize
     requirements: str = Field(strict=True, max_length=2000)
 
 

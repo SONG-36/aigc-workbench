@@ -26,7 +26,14 @@ class SlotKind(StrEnum):
     SCENE = "scene"
 
 
-OUTPUT_SIZES = {"1024x1536", "1024x1024", "1536x1024"}
+class OutputSize(StrEnum):
+    PORTRAIT = "1024x1536"
+    SQUARE = "1024x1024"
+    LANDSCAPE = "1536x1024"
+    LARGE_SQUARE = "1536x1536"
+
+
+OUTPUT_SIZES = frozenset(OutputSize)
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,7 @@ import { operationId as newOperationId } from '../utils/operationId'
 import { useEffect, useState } from 'react'
 import { configureSlot, createSlot } from '../api/tasks'
 import type { WriteAction } from '../hooks/useWriteAction'
-import type { ImageSlot, SlotKind, TaskDraft } from '../types'
+import { OUTPUT_SIZES, type ImageSlot, type OutputSize, type SlotKind, type TaskDraft } from '../types'
 
 const kinds: [SlotKind, string][] = [
   ['main', '主图'], ['comparison', '同类商品对比图'], ['selling_point', '卖点图'], ['scene', '使用场景图'],
@@ -53,9 +53,11 @@ function SlotEditor({ task, slot, label, write, onSaved, onDirty }: {
         <option value="">尚未绑定</option>
         {references.map(a => <option key={a.id} value={a.id}>{a.filename}</option>)}
       </select></label>
-      <label>输出尺寸<select value={size} onChange={event => setSize(event.target.value)}>
-        <option>1024x1536</option><option>1024x1024</option><option>1536x1024</option>
+      <label>输出尺寸<select value={size} onChange={event => setSize(event.target.value as OutputSize)}>
+        {OUTPUT_SIZES.map(value => <option key={value} value={value}>
+          {value === '1536x1536' ? '1536 × 1536（正方形）' : value}</option>)}
       </select></label>
+      {size === '1536x1536' && <p className="muted">以 1024×1024 原生方图生成，再用 LANCZOS 等比例放大至 1536×1536；不裁切。</p>}
       <label>补充制作要求<textarea maxLength={2000} rows={2} value={requirements}
         onChange={event => setRequirements(event.target.value)} /></label>
       <button type="submit">保存{label}配置</button>

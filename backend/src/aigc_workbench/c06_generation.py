@@ -11,12 +11,14 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from .c01_context import C01Error, fingerprint, now
-from .c01_model import MODEL as UNDERSTANDING_MODEL, OpenAIResponsesTransport, credential_status
+from .c01_model import OpenAIResponsesTransport, credential_status
 from .c01_real import C01RealService
 from .c06_candidates import CandidateStore
 from .file_storage import inspect_image
 from .source_paths import archived_path
-from .quick_a_creation_decision import QuickACreationDecisionService
+from .quick_a_creation_decision import QuickACreationDecisionService, compose_decision_prompt
+from .image_sizes import output_plan, snapshot_output_plan
+from .image_output import final_png
 
 MODEL = "gpt-image-2.6-sunburst"
 ENDPOINT = "https://api.openai.com/v1/images/edits"
@@ -27,15 +29,33 @@ PARAMETERS = {"model": MODEL, "size": "1024x1536", "quality": "high", "complexit
               "n": 1, "stream": False, "output_format": "png"}
 
 
-def estimate_image_cost(prompt: str, image_count: int = 2) -> dict:
-    # Current official calculator: high grid edge=48, other edge=32 at 1024x1536.
-    output_tokens = ceil(48 * 32 * (2_000_000 + 1024 * 1536) / 4_000_000)
+def image_parameters(plan: dict) -> dict:
+    return {**PARAMETERS, "size": plan["model_generation_size"]}
+
+
+def generation_prompt(sources: dict, plan: dict) -> str:
+    if (plan["requested_output_size"] == plan["model_generation_size"]
+            == sources["decision_snapshot"]["context"]["slot_state"]["output_size"]):
+        return sources["prompt"]
+    return (sources["prompt"] + "\n\nOUTPUT PIXEL SIZE OVERRIDE (not product physical dimensions): "
+            + f"requested_output_size={plan['requested_output_size']}; model_generation_size={plan['model_generation_size']}; "
+            + f"final_output_size={plan['final_output_size']}; postprocess={plan['postprocess']}. "
+            + "Use the actual model canvas for composition, overriding only prior canvas pixel size/aspect instructions. "
+            + "Preserve all product, accessory, text and marketing constraints. Do not crop important content.")
+
+
+def estimate_image_cost(prompt: str, image_count: int = 2, model_size: str = "1024x1536") -> dict:
+    width, height = map(int, model_size.split("x"))
+    # High-quality grid long edge=48; preserve the actual request aspect ratio.
+    grid_width, grid_height = ceil(48 * width / max(width, height)), ceil(48 * height / max(width, height))
+    output_tokens = ceil(grid_width * grid_height * (2_000_000 + width * height) / 4_000_000)
     # Explicit planning allowances, not an official image-input tokenizer or provider cap.
     text_allowance = len(prompt.encode()) + 1024
     image_allowance = 32768 * image_count
     total = (Decimal(text_allowance) * 5 + Decimal(image_allowance) * 8 + output_tokens * 30) / 1_000_000
     return {"label": "LOCAL_PLANNING_ESTIMATE_NOT_PROVIDER_CAP", "currency": "USD",
             "planning_envelope_usd": str(total), "official_output_token_estimate": output_tokens,
+            "model_generation_size": model_size,
             "official_image_output_cost_usd": str(Decimal(output_tokens) * 30 / 1_000_000),
             "text_input_token_allowance": text_allowance, "image_input_token_allowance": image_allowance,
             "input_allowance_note": "本地保守规划余量，不是已验证的2.6输入分词公式；实际用量可能不同。",
@@ -75,9 +95,28 @@ class OpenAIImageEditsTransport(OpenAIResponsesTransport):
 
 class C06Service(C01RealService):
     def _sources(self, decision_id: UUID, handoff_directory: Path) -> dict:
-        decision = QuickACreationDecisionService(self.settings, self.service).preflight(
-            decision_id, UNDERSTANDING_MODEL)
-        snapshot = decision["snapshot"]
+        # Revalidate the archived C03-C05 decision without rewriting it or its Prompt.
+        # Only the current output pixel size may differ; all other source/state checks remain strict.
+        decision = QuickACreationDecisionService(self.settings, self.service)
+        snapshot = self.service.evidence.load_snapshot(decision_id)
+        context = snapshot["context"]
+        if (snapshot.get("capability") != "C03_C04_C05" or fingerprint(context) != snapshot["context_sha256"]
+                or snapshot["prompt"] != compose_decision_prompt(context, str(decision_id))):
+            raise C01Error("DECISION_SNAPSHOT_INVALID", "MODEL_PREFLIGHT", "原制作决定快照不一致。")
+        selection, product, reference, runs = decision.select_sources(
+            UUID(snapshot["task_id"]), UUID(snapshot["slot_id"]), UUID(snapshot["product_asset_id"]),
+            UUID(snapshot["reference_asset_id"]), *[UUID(value) for value in snapshot["upstream_run_ids"]])
+        current_slot = selection["slot_state"]
+        comparable = {**selection, "slot_state": {**current_slot,
+                      "output_size": snapshot["source_selection"]["slot_state"]["output_size"]}}
+        reference_snapshot = self.service.evidence.load_snapshot(UUID(runs[1]["snapshot_id"]))
+        if (comparable != snapshot["source_selection"] or runs != context["upstream_results"]
+                or product != self.service.evidence.read_snapshot_image(snapshot)
+                or reference != self.service.evidence.read_snapshot_image(reference_snapshot)):
+            raise C01Error("DECISION_SOURCE_CHANGED", "MODEL_PREFLIGHT", "制作要求、原图或上游依据已变化。")
+        output_plan(current_slot["output_size"])
+        images = [{"image_url": "data:" + item["media_type"] + ";base64," + base64.b64encode(data).decode()}
+                  for item, data in zip(context["image_inputs"], (product, reference))]
         files = ["05_C06_EXECUTION_HANDOFF.md", "05_C06_EXECUTION_HANDOFF.json",
                  "04_QUALITY_AMENDMENTS.md", "04_QUALITY_AMENDMENTS.json", "structured-result.json"]
         local_directory = archived_path(self.settings, handoff_directory)
@@ -94,7 +133,7 @@ class C06Service(C01RealService):
         handoff = json.loads((local_directory / files[1]).read_text())
         prompt = handoff["image_creation_decision"]["C06_creation_input"]
         if (handoff["task_id"] != snapshot["task_id"] or handoff["slot_id"] != snapshot["slot_id"]
-                or handoff["output_size"] != "1024x1536" or handoff["C06_executed"] is not False
+                or handoff["output_size"] != context["slot_state"]["output_size"] or handoff["C06_executed"] is not False
                 or handoff["status"] != "PROPOSED / REVIEW PENDING / NOT OPERATOR APPROVED"
                 or not prompt or prompt not in (local_directory / files[0]).read_text()
                 or [item["sha256"] for item in handoff["images_in_order"]]
@@ -112,7 +151,7 @@ class C06Service(C01RealService):
         return {"decision_snapshot": snapshot, "decision_run_id": run["run_id"],
                 "sources": sources, "prompt": prompt,
                 "handoff_directory": str(handoff_directory.resolve()),
-                "images": decision["request"]["input"][0]["content"][1:]}
+                "images": images, "slot_state": current_slot}
 
     def prepare(self, decision_id: UUID, handoff_directory: Path, model: str) -> dict:
         if model != MODEL:
@@ -120,10 +159,12 @@ class C06Service(C01RealService):
         sources = self._sources(decision_id, handoff_directory)
         old = sources["decision_snapshot"]
         identity = str(uuid4())
-        context = {"business_source": old["context"]["business_source"], "slot_state": old["context"]["slot_state"],
+        plan = output_plan(sources["slot_state"]["output_size"])
+        prompt = generation_prompt(sources, plan)
+        context = {"business_source": old["context"]["business_source"], "slot_state": sources["slot_state"],
                    "image_inputs": old["context"]["image_inputs"],
                    "capability_specific_inputs": old["context"]["capability_specific_inputs"],
-                   "operator_confirmed_information": [], "production_instruction": sources["prompt"],
+                   "operator_confirmed_information": [], "production_instruction": prompt,
                    "decision_snapshot_id": str(decision_id), "source_provenance": sources["sources"]}
         planned_images = old["prompt"]["planned_model_input"]["images"]
         snapshot = {"id": identity, "created_at": now(), "capability": "C06", "task_id": old["task_id"],
@@ -131,30 +172,33 @@ class C06Service(C01RealService):
                     "reference_asset_id": old["reference_asset_id"], "decision_snapshot_id": str(decision_id),
                     "upstream_run_ids": [sources["decision_run_id"]], "source_provenance": sources["sources"],
                     "handoff_directory": sources["handoff_directory"], "context": context,
-                    "context_sha256": fingerprint(context), "effective_state": old["effective_state"],
-                    "prompt": {"planned_model_input": {"label": "PLANNED MODEL INPUT", "text": sources["prompt"],
+                    "context_sha256": fingerprint(context),
+                    "effective_state": {**old["effective_state"], "slot_state": sources["slot_state"], "output_plan": plan},
+                    "prompt": {"planned_model_input": {"label": "PLANNED MODEL INPUT", "text": prompt,
                                                        "images": planned_images}},
                     "actual_model_input": None, "input_classification": "PLANNED MODEL INPUT",
-                    "model_api_call_attempted": False, "parameters": PARAMETERS}
+                    "model_api_call_attempted": False, "parameters": image_parameters(plan), "output_plan": plan}
         return self.service.evidence.save_snapshot(snapshot, base64.b64decode(sources["images"][0]["image_url"].split(",", 1)[1]))
 
     def preflight(self, snapshot_id: UUID, model: str, max_output_tokens: int = 4096) -> dict:
         snapshot = self.service.evidence.load_snapshot(snapshot_id)
-        if (model != MODEL or snapshot.get("capability") != "C06" or snapshot.get("parameters") != PARAMETERS
+        plan = snapshot_output_plan(snapshot)
+        if (model != MODEL or snapshot.get("capability") != "C06" or snapshot.get("parameters") != image_parameters(plan)
                 or fingerprint(snapshot["context"]) != snapshot["context_sha256"]):
             raise C01Error("C06_SNAPSHOT_INVALID", "MODEL_PREFLIGHT", "C06模型、参数或快照不一致。")
         sources = self._sources(UUID(snapshot["decision_snapshot_id"]), Path(snapshot["handoff_directory"]))
         if (sources["sources"] != snapshot["source_provenance"]
-                or sources["prompt"] != snapshot["prompt"]["planned_model_input"]["text"]
-                or sources["decision_snapshot"]["context"]["slot_state"] != snapshot["context"]["slot_state"]
+                or generation_prompt(sources, plan) != snapshot["prompt"]["planned_model_input"]["text"]
+                or sources["slot_state"] != snapshot["context"]["slot_state"]
+                or plan["requested_output_size"] != sources["slot_state"]["output_size"]
                 or self.service.evidence.read_snapshot_image(snapshot)
                 != base64.b64decode(sources["images"][0]["image_url"].split(",", 1)[1])):
             raise C01Error("C06_SOURCE_CHANGED", "MODEL_PREFLIGHT", "C06制作依据、要求或原图变化。")
-        request = {**PARAMETERS, "prompt": sources["prompt"],
+        request = {**image_parameters(plan), "prompt": snapshot["prompt"]["planned_model_input"]["text"],
                    "images": [{"image_url": part["image_url"]} for part in sources["images"]]}
         return {"label": "C06 PLANNED MODEL INPUT / NO REQUEST SENT", "snapshot": snapshot,
                 "request": request, "request_sha256": fingerprint(request), "endpoint": ENDPOINT,
-                "cost": estimate_image_cost(sources["prompt"]), "credentials": credential_status(),
+                "cost": estimate_image_cost(request["prompt"], model_size=request["size"]), "credentials": credential_status(),
                 "model_api_call_attempted": False, "network_requests": 0}
 
     def parse_output(self, raw: dict, model: str) -> dict:
@@ -165,6 +209,18 @@ class C06Service(C01RealService):
         if (metadata.media_type, metadata.width, metadata.height) != ("image/png", 1024, 1536):
             raise C01Error("C06_OUTPUT_FORMAT_INVALID", "OUTPUT_PARSE", "实际输出不是1024x1536 PNG。")
         return {"image": asdict(metadata), "status": "CANDIDATE_REVIEW_PENDING", "operator_approved": False}
+
+    def parse_execution_output(self, raw: dict, model: str, snapshot: dict) -> dict:
+        if "output_plan" not in snapshot:
+            return self.parse_output(raw, model)  # Historical native portrait snapshots.
+        if raw.get("model", model) != model:
+            raise C01Error("C06_RESPONSE_MODEL_MISMATCH", "OUTPUT_PARSE", "响应模型与指定模型不同。")
+        native = png_from_response(raw)
+        plan = snapshot_output_plan(snapshot)
+        final = final_png(native, plan)
+        return {"image": asdict(inspect_image(final, "image/png")),
+                "native_image": asdict(inspect_image(native, "image/png")), **plan,
+                "status": "CANDIDATE_REVIEW_PENDING", "operator_approved": False}
 
     def cost_from_usage(self, raw: dict) -> dict | None:
         return image_usage_cost(raw)
@@ -185,7 +241,8 @@ class C06Service(C01RealService):
                              max_cost_usd=max_cost_usd, transport=transport or OpenAIImageEditsTransport())
         if record["status"] == "SUCCEEDED" and record["transport_label"] == "REAL_PROVIDER_TRANSPORT":
             snapshot = self.service.evidence.load_snapshot(snapshot_id)
-            candidate = CandidateStore(self.store.database, self.settings.data_dir).save(
-                record, snapshot, png_from_response(record["actual_model_response"]))
+            native = png_from_response(record["actual_model_response"])
+            final = final_png(native, snapshot_output_plan(snapshot))
+            candidate = CandidateStore(self.store.database, self.settings.data_dir).save(record, snapshot, final)
             return {**record, "candidate": candidate}
         return record

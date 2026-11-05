@@ -2,6 +2,7 @@
 
 import json
 import os
+from pathlib import Path
 from uuid import UUID
 
 from .application import TaskNotFound
@@ -76,7 +77,16 @@ class GenerationApplication:
         if not rows:
             raise C01Error("CREATION_DECISION_MISSING", "SOURCE_SELECTION", "本图位尚无已归档且可执行的制作决定。")
         # A newer invalid decision must not silently fall back to an older one.
-        return self._service().preflight(UUID(rows[0]["id"]), MODEL)
+        service = self._service()
+        snapshot = service.service.evidence.load_snapshot(UUID(rows[0]["id"]))
+        _, slot = self._slot(task_id, slot_id)
+        if slot.output_size != snapshot["context"]["slot_state"]["output_size"]:
+            # A changed pixel size needs a new execution snapshot, never a rewrite of the
+            # decision or previous Run. prepare revalidates every non-size source/requirement.
+            # Subsequent reads reuse this snapshot; this is offline preparation, never dispatch.
+            snapshot = service.prepare(UUID(snapshot["decision_snapshot_id"]),
+                                       Path(snapshot["handoff_directory"]), MODEL)
+        return service.preflight(UUID(snapshot["id"]), MODEL)
 
     @property
     def budget_policy(self):
@@ -93,6 +103,8 @@ class GenerationApplication:
                 "product_asset_id", "reference_asset_id", "status", "image", "operator_approved", "pass")
         return {**{key: body[key] for key in keys}, "base_image_version_id": body.get("base_image_version_id"),
                 "revision_text": body.get("revision_text"),
+                **{key: body[key] for key in ("requested_output_size", "model_generation_size", "final_output_size", "postprocess")
+                   if key in body},
                 "url": f"/api/tasks/{task_id}/slots/{slot_id}/versions/{version_id}/content"}
 
     def content(self, task_id, slot_id, version_id):
@@ -125,7 +137,14 @@ class GenerationApplication:
             if item_error and item_error.get("code") == "CANDIDATE_NOT_SAVED" and candidate_ids:
                 state, item_error = "SUCCEEDED", None  # A separately completed local save recovered the result.
             if state == "SUCCEEDED" and not candidate_ids:
-                state, item_error = "FAILED", {"code": "CANDIDATE_NOT_SAVED", "message": "模型已返回，候选未可靠保存；不要重新付费。"}
+                # PNG postprocessing/publication can finish between the candidate query and
+                # the Run query. An older projection must not report a false save failure.
+                with self.database.connection() as db:
+                    published = db.execute("SELECT id FROM image_versions WHERE run_id=?", (run["run_id"],)).fetchone() if run else None
+                if published or run is None:
+                    state, item_error = "RUNNING", None  # Next poll reads the published candidate.
+                else:
+                    state, item_error = "FAILED", {"code": "CANDIDATE_NOT_SAVED", "message": "模型已返回，候选未可靠保存；不要重新付费。"}
             error = {key: item_error[key] for key in ("code", "message") if key in item_error} if item_error else None
             items.append({"operation_id": operation, "run_id": run["run_id"] if run else None,
                           "attempt_id": run["attempt_id"] if run else None, "state": state,
@@ -170,6 +189,7 @@ class GenerationApplication:
                 authorize(self.settings, True, self.budget_policy, preflight["cost"])  # Offline guard only; no request.
                 snapshot = preflight["snapshot"]
                 readiness.update(can_generate=True, reason="制作决定及来源已核验，可生成一张待审候选。",
+                    parameters=preflight["snapshot"]["parameters"],
                     quote_token=self._quote(preflight), estimate_usd=preflight["cost"]["planning_envelope_usd"],
                     decision_snapshot_id=snapshot["decision_snapshot_id"], product_asset_id=snapshot["product_asset_id"],
                     reference_asset_id=snapshot["reference_asset_id"])
