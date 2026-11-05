@@ -37,8 +37,6 @@ function SlotOutput({ task, slot, locked, draft, setDraft }: {
   const generation = useSlotGeneration(task, slot)
   const [selected, setSelected] = useState('')
   const [viewer, setViewer] = useState<{ url: string; title: string } | null>(null)
-  const [confirming, setConfirming] = useState(false)
-  const [acknowledged, setAcknowledged] = useState(false)
   const { data, error, submitting, uncertain } = generation
   const candidate = data?.candidates.find(c => c.image_version_id === selected) || data?.candidates[0]
   const ready = data?.readiness
@@ -51,8 +49,8 @@ function SlotOutput({ task, slot, locked, draft, setDraft }: {
 
   return <div className="slot-output">
     <div className="output-controls">
-      <button className="primary" disabled={!canGenerate} onClick={() => { setAcknowledged(false); setConfirming(true) }}>
-        {submitting ? '正在提交…' : '生成一张候选（付费）'}</button>
+      <button className="primary" disabled={!canGenerate} onClick={event => { if (event.detail < 2) void generation.submit() }}>
+        {submitting ? '正在提交…' : '生成一张候选'}</button>
       <div><span role="status" className="pill">{data ? labels[data.state] : '读取服务器状态…'}</span>
         <p className="muted">{locked ? '有待保存或待核对的输入，请先处理。' : ready?.reason}</p></div>
       <button onClick={generation.refresh}>刷新执行状态</button>
@@ -107,6 +105,8 @@ function SlotOutput({ task, slot, locked, draft, setDraft }: {
           {e.execution_mode === 'TEST_SUBSTITUTE' ? ' · 测试替代工具' : ''}</p>
         <p className="muted">{e.model} · Run {e.run_id || '尚未进入模型执行'}
           {e.duration_ms !== null ? ` · ${(e.duration_ms / 1000).toFixed(2)} 秒` : ''}</p>
+        {e.usage && <p className="muted">实际 Usage：输入 {e.usage.input_tokens ?? '未知'}，输出 {e.usage.output_tokens ?? '未知'} tokens。</p>}
+        {e.usage_cost_estimate && <p className="muted">用量费用估算 USD {e.usage_cost_estimate.usd}（费率日期 {e.usage_cost_estimate.checked_on}，非最终账单）。</p>}
         {e.error && <p className="error">{e.error.message}（{e.error.code}）</p>}
       </div>)}
     </details>}
@@ -114,17 +114,7 @@ function SlotOutput({ task, slot, locked, draft, setDraft }: {
       <img className="full-image" src={viewer.url} alt={viewer.title} />
       <a href={viewer.url} target="_blank" rel="noreferrer">新窗口查看原始文件</a>
     </Overlay>}
-    {confirming && ready && <Overlay title="确认一次付费生图" onClose={() => setConfirming(false)}>
-      {data?.execution_mode === 'TEST_SUBSTITUTE' && <p className="notice">测试替代工具 · 不调用真实 API</p>}
-      <p>仅为当前「{kinds[slot.kind]}」生成 1 张待审候选，使用当前已保存的商品、参考与制作决定。</p>
-      <p>模型：{ready.model}</p><p>本地规划估算 USD {ready.estimate_usd}；执行估算门槛 USD {ready.max_cost_usd}。</p>
-      <p className="muted">估算门槛不是供应商账单硬上限。不会自动重试；新候选不会自动 Pass。</p>
-      <label className="paid-ack"><input type="checkbox" checked={acknowledged}
-        onChange={event => setAcknowledged(event.target.checked)} />我了解这是一次付费调用</label>
-      <button className="primary" disabled={!acknowledged || !canGenerate} onClick={() => {
-        setConfirming(false); void generation.submit()
-      }}>确认付费，生成 1 张</button>
-    </Overlay>}
+
   </div>
 }
 
@@ -134,7 +124,7 @@ export function GenerationWorkspace({ task, locked, unsavedSlots }: {
   const [search, setSearch] = useSearchParams()
   const [drafts, setDrafts] = useState<Record<string, RevisionDrafts>>({})
   const selected = task.slots.find(s => s.id === search.get('slot')) || task.slots[0]
-  if (!selected) return <><button disabled>生成一张候选（付费）</button>
+  if (!selected) return <><button disabled>生成一张候选</button>
     <div className="empty">请先保存一个图位；尚未开始生成。</div></>
   return <div className="output-layout"><nav className="output-slots" aria-label="选择制作图位">
     {task.slots.map(s => <button key={s.id} aria-pressed={s.id === selected.id} onClick={() => {

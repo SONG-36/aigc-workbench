@@ -45,7 +45,7 @@ describe('C07 explicit base, paid action and manual review boundaries', () => {
     expect(submit).not.toHaveBeenCalled()
   })
 
-  it('prepares nonpaid frozen inputs and requires acknowledgement before exactly one edit submit', async () => {
+  it('one manual edit click prepares inputs and submits without fee approval', async () => {
     const fetch = vi.fn().mockImplementation((_p, options) => {
       const text = JSON.parse(options.body).revision_text
       return Promise.resolve(response({ snapshot_id: 'frozen', base_image_version_id: 'v1', revision_text: text,
@@ -55,26 +55,27 @@ describe('C07 explicit base, paid action and manual review boundaries', () => {
     const user = userEvent.setup()
     await user.click(screen.getByText('以当前查看版本为修改基础'))
     await user.type(screen.getByLabelText('本轮修改意见'), 'Color only')
-    await user.click(screen.getByText('检查修改与费用'))
-    expect(await screen.findByText(/0.91/)).toBeInTheDocument()
-    expect(screen.getByText('确认付费，修改 1 张')).toBeDisabled()
-    expect(submit).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('checkbox'))
-    await user.dblClick(screen.getByText('确认付费，修改 1 张'))
-    expect(submit).toHaveBeenCalledTimes(1)
+    await user.dblClick(screen.getByText('修改这张图片'))
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.queryByText('确认一次付费修改')).not.toBeInTheDocument()
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(fetch.mock.calls[0][0]).toContain('/versions/v1/revision-quote')
   })
 
-  it('invalidates a quote when the operator changes the draft', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ snapshot_id: 'frozen', base_image_version_id: 'v1',
-      revision_text: 'A', model: 'fixed', estimate_usd: '0.9', max_cost_usd: '1.00' })))
-    render(<DraftHarness submit={vi.fn()} />); const user = userEvent.setup()
+  it('does not dispatch a late preflight after the operator leaves the component', async () => {
+    let resolve!: (value: Response) => void
+    const pending = new Promise<Response>(yes => { resolve = yes })
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(pending))
+    const submit = vi.fn().mockResolvedValue(undefined)
+    const component = render(<DraftHarness submit={submit} />); const user = userEvent.setup()
     await user.click(screen.getByText('以当前查看版本为修改基础'))
     await user.type(screen.getByLabelText('本轮修改意见'), 'A')
-    await user.click(screen.getByText('检查修改与费用')); await screen.findByText('确认一次付费修改')
-    await user.type(screen.getByLabelText('本轮修改意见'), 'B')
-    expect(screen.queryByText('确认一次付费修改')).not.toBeInTheDocument()
+    await user.click(screen.getByText('修改这张图片'))
+    component.unmount()
+    resolve(response({ snapshot_id: 'frozen', base_image_version_id: 'v1', revision_text: 'A', quote_token: 'q' }))
+    await pending
+    expect(submit).not.toHaveBeenCalled()
   })
 
   it('saves one explicit review of the exact version with expected delivery identity', async () => {
@@ -83,7 +84,7 @@ describe('C07 explicit base, paid action and manual review boundaries', () => {
     render(<ReviewPanel taskId="t" slotId="s" candidate={base} data={data} disabled={false} refresh={refresh} />)
     const user = userEvent.setup()
     expect(screen.getByText('Pass 此版本')).toBeDisabled()
-    await user.type(screen.getByLabelText('审核人'), 'Tester')
+    await user.type(screen.getByLabelText('操作者标签'), 'Tester')
     await user.type(screen.getByLabelText('审核反馈'), 'Visually checked synthetic image')
     await user.click(screen.getByText('Pass 此版本'))
     expect(fetch).not.toHaveBeenCalled()

@@ -1,3 +1,4 @@
+import { operationId as newOperationId } from '../utils/operationId'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createQuickADraft } from '../api/tasks'
@@ -23,13 +24,13 @@ function remember(intent: Intent | null) {
 export function TaskForm() {
   const [restored, setRestored] = useState(previousIntent)
   const [title, setTitle] = useState(restored?.title || '')
-  const [operationId, setOperationId] = useState(() => restored?.operationId || crypto.randomUUID())
+  const [operationId, setOperationId] = useState(() => restored?.operationId || newOperationId())
   const write = useWriteAction()
   const navigate = useNavigate()
 
   useEffect(() => {
     if (write.error && !write.unknown) {
-      remember(null); setRestored(null); setOperationId(crypto.randomUUID())
+      remember(null); setRestored(null); setOperationId(newOperationId())
     }
   }, [write.error, write.unknown])
 

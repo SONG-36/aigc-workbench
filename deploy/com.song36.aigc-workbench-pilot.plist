@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.song36.aigc-workbench-pilot</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/andy_server/apps/aigc-workbench-pilot/current/backend/.venv/bin/python</string>
+    <string>-m</string><string>aigc_workbench.pilot_server</string>
+    <string>--config</string><string>/Users/andy_server/apps/aigc-workbench-pilot/shared/pilot.json</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/andy_server/apps/aigc-workbench-pilot/current</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ExitTimeOut</key><integer>340</integer>
+  <key>Umask</key><integer>63</integer>
+  <key>StandardOutPath</key><string>/Users/andy_server/apps/aigc-workbench-pilot/shared/logs/stdout.log</string>
+  <key>StandardErrorPath</key><string>/Users/andy_server/apps/aigc-workbench-pilot/shared/logs/stderr.log</string>
+</dict>
+</plist>

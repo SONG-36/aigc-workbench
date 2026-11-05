@@ -101,7 +101,7 @@ class CandidateStore:
         with self.database.connection(write=True) as db:
             existing = db.execute("SELECT body_json FROM image_versions WHERE run_id=?", (run["run_id"],)).fetchone()
             if existing:
-                if json.loads(existing[0]) != body:
+                if {k: v for k, v in json.loads(existing[0]).items() if k != "file"} != {k: v for k, v in body.items() if k != "file"}:
                     raise C01Error("CANDIDATE_CONFLICT", "CANDIDATE_SAVE", "同一Run不能创建不同候选。")
             else:
                 if (target.exists() or target.is_symlink()):

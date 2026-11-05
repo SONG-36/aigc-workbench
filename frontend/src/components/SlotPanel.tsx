@@ -1,3 +1,4 @@
+import { operationId as newOperationId } from '../utils/operationId'
 import { useEffect, useState } from 'react'
 import { configureSlot, createSlot } from '../api/tasks'
 import type { WriteAction } from '../hooks/useWriteAction'
@@ -10,10 +11,10 @@ const kinds: [SlotKind, string][] = [
 function AddSlot({ task, kind, label, write, onSaved }: {
   task: TaskDraft; kind: SlotKind; label: string; write: WriteAction; onSaved: (task: TaskDraft) => void
 }) {
-  const [operationId, setOperationId] = useState(() => crypto.randomUUID())
+  const [operationId, setOperationId] = useState(() => newOperationId())
   return <button type="button" className="add-slot" disabled={write.locked} onClick={() => {
     void write.run(() => createSlot(task.id, kind, operationId), updated => {
-      onSaved(updated); setOperationId(crypto.randomUUID())
+      onSaved(updated); setOperationId(newOperationId())
     })
   }}>＋ 添加{label}</button>
 }

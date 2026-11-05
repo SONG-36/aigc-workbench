@@ -10,7 +10,7 @@ export function WorkspaceShell({ task, children, output }: { task: TaskDraft | n
         <p className="muted">共享商品资料，在统一工作台制作与审核图片。</p>
       </div><span className="pill">Quick-A · 准备草稿</span>
     </div>
-    <p className="notice" role="status">可查看历史候选、选择基础版本修改，并人工 Pass / Reject。生成和修改须显式付费确认，下载以本图位当前有效 Pass 为准。</p>
+    <p className="notice" role="status">可查看历史候选、选择基础版本修改，并人工 Pass / Reject。生成和修改由手动点击触发，下载以本图位当前有效 Pass 为准。</p>
     <details id="input-panel" open={inputOpen} onToggle={event => setInputOpen(event.currentTarget.open)}>
       <summary><span className="eyebrow">INPUT</span><strong>{task?.title || '共享资料与商品理解'}</strong>
         <span className="muted">按需展开</span></summary>

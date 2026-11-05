@@ -16,20 +16,22 @@ export interface ImageReview {
 }
 export interface RevisionQuote {
   snapshot_id: string; base_image_version_id: string; base_sha256: string; revision_text: string
-  quote_token: string; model: string; estimate_usd: string; max_cost_usd: string
+  quote_token: string; model: string; estimate_usd: string; max_cost_usd: string | null
 }
 export interface Execution {
   operation_id: string; run_id: string | null; attempt_id: string | null; state: ExecutionState
   created_at: string; finished_at: string | null; model: string; execution_mode: 'REAL' | 'TEST_SUBSTITUTE'
   candidate_ids: string[]; http_status: number | null; duration_ms: number | null
   error: { code: string; message: string } | null
+  usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number } | null
+  usage_cost_estimate?: { usd: string; checked_on: string } | null
 }
 export interface SlotWorkspace {
   execution_mode?: 'REAL' | 'TEST_SUBSTITUTE'
   task_id: string; slot_id: string; state: ExecutionState; candidates: Candidate[]; executions: Execution[]
   readiness: {
     can_generate: boolean; reason: string; quote_token: string | null; model: string
-    max_cost_usd: string; estimate_usd: string | null; decision_snapshot_id: string | null
+    max_cost_usd: string | null; estimate_usd: string | null; decision_snapshot_id: string | null
     product_asset_id: string | null; reference_asset_id: string | null
   }
   can_request_revision?: boolean; reviews?: ImageReview[]
@@ -65,7 +67,6 @@ export function reviseImage(taskId: string, slotId: string, operationId: string,
   return request(`/tasks/${taskId}/slots/${slotId}/revisions`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
       operation_id: operationId, snapshot_id: quote.snapshot_id, quote_token: quote.quote_token,
-      confirm_paid: true, max_cost_usd: '1.00',
     }),
   })
 }
@@ -82,6 +83,6 @@ export function reviewImage(taskId: string, slotId: string, versionId: string, o
 export async function generateImage(taskId: string, slotId: string, operationId: string, quoteToken: string) {
   return request(`/tasks/${taskId}/slots/${slotId}/generations`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ operation_id: operationId, quote_token: quoteToken, confirm_paid: true, max_cost_usd: '1.00' }),
+    body: JSON.stringify({ operation_id: operationId, quote_token: quoteToken }),
   })
 }

@@ -130,7 +130,7 @@ describe('S01 deterministic UI contracts with explicit HTTP mocks', () => {
     expect(screen.queryByAltText('待上传预览：product.png')).not.toBeInTheDocument()
     expect(revoke).toHaveBeenCalledWith('blob:local-preview')
     expect(fetchMock.mock.calls[1][1].body).toBe(file)
-    expect(screen.getByRole('button', { name: '生成一张候选（付费）' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成一张候选' })).toBeDisabled()
   })
 
   it('releases local preview on unmount and ignores a late upload response', async () => {
@@ -196,6 +196,6 @@ describe('S01 deterministic UI contracts with explicit HTTP mocks', () => {
     const saved = fetchMock.mock.calls.find(([, options]) => options?.method === 'PUT')!
     expect(saved[0]).toBe(`/api/tasks/${task.id}/slots/${slot.id}`)
     expect(JSON.parse(saved[1].body).reference_asset_id).toBe(reference.id)
-    expect(screen.getByRole('button', { name: '生成一张候选（付费）' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成一张候选' })).toBeDisabled()
   })
 })

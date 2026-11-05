@@ -1,3 +1,4 @@
+import { operationId as newOperationId } from '../utils/operationId'
 import { useEffect, useRef, useState } from 'react'
 import { ApiError } from '../api/tasks'
 import { quoteRevision, reviewImage, type Candidate, type RevisionQuote, type SlotWorkspace } from '../api/generation'
@@ -10,25 +11,27 @@ export function RevisionPanel({ taskId, slotId, candidate, data, draft, setDraft
   setDraft: (draft: RevisionDrafts) => void; select: (id: string) => void; disabled: boolean
   submit: (quote: RevisionQuote) => Promise<void>
 }) {
-  const [quote, setQuote] = useState<RevisionQuote | null>(null)
   const [quoting, setQuoting] = useState(false)
   const [error, setError] = useState('')
-  const [ack, setAck] = useState(false)
   const quoteLock = useRef(false)
   const text = draft.texts[draft.baseId] || ''
   const matches = draft.baseId === candidate.image_version_id
-  useEffect(() => { setQuote(null); setAck(false) }, [draft.baseId, text])
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   async function prepare() {
     if (quoteLock.current || disabled || !matches || !text.trim()) return
     quoteLock.current = true; setQuoting(true); setError('')
-    try { setQuote(await quoteRevision(taskId, slotId, draft.baseId, text)); setAck(false) }
+    try {
+      const prepared = await quoteRevision(taskId, slotId, draft.baseId, text)
+      if (mounted.current) await submit(prepared)
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : '修改预检失败，未付费。') }
     finally { setQuoting(false); quoteLock.current = false }
   }
   return <section className="revision-panel" aria-label="单图修改">
     <h3>基于指定版本修改</h3>
     <button disabled={disabled || quoting} onClick={() => {
-      setDraft({ ...draft, baseId: candidate.image_version_id }); setQuote(null); setError('')
+      setDraft({ ...draft, baseId: candidate.image_version_id }); setError('')
     }}>以当前查看版本为修改基础</button>
     {draft.baseId && <>
       <p className="muted">修改基础：{draft.baseId}</p>
@@ -38,21 +41,11 @@ export function RevisionPanel({ taskId, slotId, candidate, data, draft, setDraft
         disabled={disabled || !matches || quoting} onChange={e => setDraft({ ...draft,
           texts: { ...draft.texts, [draft.baseId]: e.target.value } })} /></label>
       <p className="muted">保留基础图已实现的有效设计；只发送当前有效约束和本轮意见。不会自动重放历史修改。</p>
-      <button disabled={disabled || !matches || !text.trim() || quoting || !data.can_request_revision} onClick={() => void prepare()}>
-        {quoting ? '正在核对修改输入…' : '检查修改与费用'}</button>
+      <button disabled={disabled || !matches || !text.trim() || quoting || !data.can_request_revision} onClick={event => { if (event.detail < 2) void prepare() }}>
+        {quoting ? '正在提交修改…' : '修改这张图片'}</button>
     </>}
     {error && <p role="alert" className="error">{error}</p>}
-    {quote && matches && quote.revision_text === text.trim() && <fieldset className="paid-confirm">
-      <legend>确认一次付费修改</legend>
-      <p>基础：{quote.base_image_version_id}</p><p>本轮意见：{quote.revision_text}</p>
-      <p>{quote.model} · 本地估算 USD {quote.estimate_usd} · 估算门槛 USD {quote.max_cost_usd}</p>
-      <p className="muted">门槛不是供应商账单硬上限；只执行一次，不自动重试，新候选不替换原 Pass。</p>
-      <label className="paid-ack"><input type="checkbox" checked={ack} onChange={e => setAck(e.target.checked)} />
-        {data.execution_mode === 'TEST_SUBSTITUTE' ? '测试替代工具，不调用真实 API' : '我确认执行这一次付费修改'}</label>
-      <button className="primary" disabled={!ack || disabled || !data.can_request_revision} onClick={() => {
-        const frozen = quote; setQuote(null); setAck(false); void submit(frozen)
-      }}>确认付费，修改 1 张</button>
-    </fieldset>}
+
   </section>
 }
 
@@ -80,7 +73,7 @@ export function ReviewPanel({ taskId, slotId, candidate, data, disabled, refresh
   async function submit() {
     if (!decision || lock.current || pending || !reviewer.trim()) return
     lock.current = true
-    const operation = crypto.randomUUID(); setPending(operation); setError('')
+    const operation = newOperationId(); setPending(operation); setError('')
     try {
       await reviewImage(taskId, slotId, candidate.image_version_id, operation, decision, reviewer, feedback, data.delivery?.id || null)
       setPending(null); setFeedback('')
@@ -93,9 +86,9 @@ export function ReviewPanel({ taskId, slotId, candidate, data, disabled, refresh
     <h3>人工审核当前查看版本</h3>
     <p>版本：{candidate.image_version_id} · {candidate.review_status || 'PENDING'}
       {candidate.is_current_delivery ? ' · 当前有效交付' : ''}</p>
-    <label>审核人<input aria-label="审核人" value={reviewer} maxLength={80} disabled={disabled || !!pending}
+    <label>操作者标签（未经身份验证）<input aria-label="操作者标签" value={reviewer} maxLength={80} disabled={disabled || !!pending}
       onChange={e => setReviewer(e.target.value)} /></label>
-    <p className="muted">本地 Pilot 使用人工填写姓名，尚无账户身份认证。</p>
+    <p className="muted">操作者标签未经身份验证，仅用于反馈追溯，不代表真实身份审计。</p>
     <label>审核反馈<textarea aria-label="审核反馈" maxLength={2000} value={feedback} disabled={disabled || !!pending}
       onChange={e => setFeedback(e.target.value)} /></label>
     <div className="review-actions">

@@ -41,7 +41,7 @@ describe('F01 frontend with explicit HTTP mocks (not browser or AI acceptance)',
     expect(await screen.findByTestId('task-id')).toHaveTextContent(task.id)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0][1].method).toBeUndefined()
-    expect(screen.getByRole('button', { name: '生成一张候选（付费）' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成一张候选' })).toBeDisabled()
     expect(screen.getByRole('button', { name: /Inspector/ })).toBeDisabled()
     expect(screen.getByText(/尚未提供商品图与营销参考，或图位绑定未齐备/)).toBeInTheDocument()
   })

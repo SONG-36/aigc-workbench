@@ -113,8 +113,8 @@ class GenerateImageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation_id: UUID
     quote_token: str = Field(strict=True, pattern=r"^[a-f0-9]{64}$")
-    confirm_paid: Literal[True]
-    max_cost_usd: Literal["1.00"]
+    confirm_paid: Literal[True] | None = None  # Legacy development clients; Pilot needs no fee approval.
+    max_cost_usd: Literal["1.00"] | None = None
 
 
 class RevisionQuoteRequest(BaseModel):

@@ -1,3 +1,4 @@
+import { operationId as newOperationId } from '../utils/operationId'
 import { useEffect, useRef, useState } from 'react'
 import { ApiError } from '../api/tasks'
 import { generateImage, getSlotWorkspace, reviseImage, type RevisionQuote, type SlotWorkspace } from '../api/generation'
@@ -43,7 +44,7 @@ export function useSlotGeneration(task: TaskDraft, slot: ImageSlot) {
   async function send(quote?: RevisionQuote) {
     if (locked.current || uncertain || (quote ? !data?.can_request_revision : !data?.readiness.can_generate || !data.readiness.quote_token)) return
     locked.current = true
-    const operation = crypto.randomUUID()
+    const operation = newOperationId()
     pendingOperation.current = operation
     setSubmitting(true); setError(null)
     try {

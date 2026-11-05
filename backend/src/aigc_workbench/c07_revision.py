@@ -13,6 +13,7 @@ from .c01_prompt import LAYER_NAMES, final_text
 from .c06_generation import C06Service, MODEL, PARAMETERS, ENDPOINT, estimate_image_cost
 from .c06_candidates import CandidateStore
 from .domain import AssetRole
+from .source_paths import archived_path
 
 INSTRUCTION = "执行C07单图局部修改。Image 1是运营明确选定的基础图片；只执行本轮目标，其余有效设计、布局和内容尽可能保持。"
 BOUNDARIES = (
@@ -51,10 +52,10 @@ class C07Service(C06Service):
         if root["capability"] != "C06" or root["task_id"] != str(task_id) or root["slot_id"] != str(slot_id):
             raise C01Error("REVISION_ROOT_INVALID", "SOURCE_SELECTION", "基础版本缺少对应的原始制作来源。")
         records = root["source_provenance"]
-        if any(sha256(Path(item["file"]).read_bytes()).hexdigest() != item["sha256"] for item in records):
+        if any(sha256(archived_path(self.settings, item["file"]).read_bytes()).hexdigest() != item["sha256"] for item in records):
             raise C01Error("REVISION_PROVENANCE_CHANGED", "SOURCE_SELECTION", "原制作决定或质量修订来源不一致。")
         source = next(item for item in records if Path(item["file"]).name == "05_C06_EXECUTION_HANDOFF.json")
-        payload = Path(source["file"]).read_bytes()
+        payload = archived_path(self.settings, source["file"]).read_bytes()
         if sha256(payload).hexdigest() != source["sha256"]:
             raise C01Error("REVISION_CONSTRAINT_SOURCE_CHANGED", "SOURCE_SELECTION", "归档制作约束哈希不一致。")
         original = json.loads(payload)["image_creation_decision"]

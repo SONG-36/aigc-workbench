@@ -97,6 +97,13 @@ def estimate_cost(snapshot: dict, request: dict) -> dict:
 
 
 def authorize(settings, confirmed: bool, max_cost_usd: str, quote: dict) -> None:
+    if settings.environment == "pilot":
+        # A business POST is the operation, not an additional fee approval. Observe cost, never cap it.
+        if not settings.enable_workspace_generation or not settings.enable_c01_real or max_cost_usd != "UNRESTRICTED_PILOT":
+            raise C01Error("REAL_EXECUTION_DISABLED", "ACCESS", "Pilot模型执行尚未启用。")
+        if os.environ.get("OPENAI_BASE_URL") or not credential_status()["OPENAI_API_KEY_configured"]:
+            raise C01Error("MODEL_CONFIGURATION_INVALID", "ACCESS", "需要服务器私有凭证和固定官方端点。")
+        return
     if settings.environment != "development" or not settings.enable_c01_real or not confirmed:
         raise C01Error("REAL_EXECUTION_DISABLED", "ACCESS",
                        "真实调用需 development、AIGC_ENABLE_C01_REAL=1 和明确付费确认。")

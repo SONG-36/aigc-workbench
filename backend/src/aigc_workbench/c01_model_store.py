@@ -70,6 +70,9 @@ class C01ModelStore:
             if snapshot["capability"] == "C07":
                 record.update(base_image_version_id=snapshot["base_image_version_id"],
                               revision_text=snapshot["context"]["revision_text"])
+            if budget == "UNRESTRICTED_PILOT":
+                record.update(user_max_cost_usd=None, execution_policy="UNRESTRICTED_INTERNAL_PILOT",
+                              trigger="EXPLICIT_BUSINESS_COMMAND / UNAUTHENTICATED_OPERATOR")
             db.execute("INSERT INTO c01_model_runs VALUES (?,?,?,?,?,?,?,?)",
                        (record["run_id"], record["attempt_id"], str(operation_id), snapshot["id"],
                         request_hash, "RUNNING", canonical(record), fingerprint(record)))

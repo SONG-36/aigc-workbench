@@ -1,3 +1,4 @@
+import { operationId as newOperationId } from '../utils/operationId'
 import { useEffect, useState } from 'react'
 import { uploadAsset } from '../api/tasks'
 import type { WriteAction } from '../hooks/useWriteAction'
@@ -8,7 +9,7 @@ export function AssetUploader({ task, role, write, onSaved }: {
 }) {
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
-  const [operationId, setOperationId] = useState(() => crypto.randomUUID())
+  const [operationId, setOperationId] = useState(() => newOperationId())
   const label = role === 'product_image' ? '商品图片' : '营销参考'
   const saved = task.assets.filter(asset => asset.role === role)
 
@@ -30,7 +31,7 @@ export function AssetUploader({ task, role, write, onSaved }: {
     <label className="upload-label">＋ 添加{label}
       <input type="file" accept="image/png,image/jpeg,image/webp" aria-label={`选择${label}`}
         disabled={write.locked} onChange={event => {
-          setFile(event.target.files?.[0] || null); setOperationId(crypto.randomUUID())
+          setFile(event.target.files?.[0] || null); setOperationId(newOperationId())
           event.target.value = ''
         }} />
     </label>

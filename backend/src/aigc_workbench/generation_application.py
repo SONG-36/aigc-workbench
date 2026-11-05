@@ -41,7 +41,8 @@ class GenerationApplication:
     @property
     def enabled(self):
         s = self.settings
-        return (s.environment == "development" and s.enable_workspace_generation and s.enable_c01_testing
+        return (s.environment in {"development", "pilot"} and s.enable_workspace_generation
+                and (s.environment == "pilot" or s.enable_c01_testing)
                 and s.enable_c01_real and os.environ.get("AIGC_ENABLE_C06_REAL") == "1")
 
     def _service(self):
@@ -77,11 +78,14 @@ class GenerationApplication:
         # A newer invalid decision must not silently fall back to an older one.
         return self._service().preflight(UUID(rows[0]["id"]), MODEL)
 
-    @staticmethod
-    def _quote(preflight):
+    @property
+    def budget_policy(self):
+        return "UNRESTRICTED_PILOT" if self.settings.environment == "pilot" else "1.00"
+
+    def _quote(self, preflight):
         return fingerprint({"snapshot_id": preflight["snapshot"]["id"],
                             "request_sha256": preflight["request_sha256"],
-                            "model": MODEL, "max_cost_usd": "1.00", "cost": preflight["cost"]})
+                            "model": MODEL, "execution_policy": self.budget_policy})
 
     def _candidate(self, task_id, slot_id, version_id):
         body, _ = self.candidates.read_for_slot(task_id, slot_id, version_id)
@@ -146,7 +150,7 @@ class GenerationApplication:
             versions = db.execute("SELECT id FROM image_versions WHERE task_id=? AND slot_id=? ORDER BY rowid DESC",
                                   (str(task_id), str(slot_id))).fetchall()
         candidates = [self._candidate(task_id, slot_id, UUID(row["id"])) for row in versions]
-        reviews = self.reviews.list(task_id, slot_id)
+        reviews = [{**r, "reviewer_identity": "UNVERIFIED_OPERATOR_LABEL"} for r in self.reviews.list(task_id, slot_id)]
         delivery = self.reviews.current(task_id, slot_id)
         for candidate in candidates:
             related = [r for r in reviews if r["image_version_id"] == candidate["image_version_id"]]
@@ -157,13 +161,13 @@ class GenerationApplication:
             candidate["is_current_delivery"] = bool(delivery and delivery["image_version_id"] == candidate["image_version_id"])
         executions = self._history(task_id, slot_id, candidates)
         readiness = {"can_generate": False, "reason": "本地服务尚未启用付费生成。", "quote_token": None,
-                     "model": MODEL, "parameters": PARAMETERS, "max_cost_usd": "1.00", "estimate_usd": None,
+                     "model": MODEL, "parameters": PARAMETERS, "max_cost_usd": None if self.settings.environment == "pilot" else "1.00", "estimate_usd": None,
                      "decision_snapshot_id": None, "product_asset_id": None,
                      "reference_asset_id": str(slot.reference_asset_id) if slot.reference_asset_id else None}
         if self.enabled and self.dispatcher.pool and not self.access_error:
             try:
                 preflight = self._select(task_id, slot_id)
-                authorize(self.settings, True, "1.00", preflight["cost"])  # Offline guard only; no request.
+                authorize(self.settings, True, self.budget_policy, preflight["cost"])  # Offline guard only; no request.
                 snapshot = preflight["snapshot"]
                 readiness.update(can_generate=True, reason="制作决定及来源已核验，可生成一张待审候选。",
                     quote_token=self._quote(preflight), estimate_usd=preflight["cost"]["planning_envelope_usd"],
@@ -190,7 +194,8 @@ class GenerationApplication:
                 "candidates": candidates, "executions": executions,
                 "state": active["state"] if active else executions[0]["state"] if executions else "NOT_STARTED"}
 
-    def submit(self, task_id, slot_id, operation_id, quote_token, max_cost_usd):
+    def submit(self, task_id, slot_id, operation_id, quote_token, max_cost_usd=None):
+        max_cost_usd = self.budget_policy if self.settings.environment == "pilot" or max_cost_usd is None else max_cost_usd
         self._slot(task_id, slot_id)
         old = self.dispatcher.replay(operation_id, task_id, slot_id, quote_token, max_cost_usd)
         if old:
@@ -205,8 +210,8 @@ class GenerationApplication:
         if not ready["can_generate"]:
             raise Conflict(ready["reason"])
         preflight = self._select(task_id, slot_id)
-        if quote_token != self._quote(preflight) or max_cost_usd != "1.00":
-            raise Conflict("制作依据或费用估算已变化，请重新查看；未执行。")
+        if quote_token != self._quote(preflight) or max_cost_usd != self.budget_policy:
+            raise Conflict("制作依据已变化，请刷新并重新核对；未执行。")
         authorize(self.settings, True, max_cost_usd, preflight["cost"])
         receipt = self.dispatcher.submit(operation_id, task_id, slot_id, preflight["snapshot"]["id"],
                                           quote_token, max_cost_usd)
@@ -219,13 +224,14 @@ class GenerationApplication:
         service = self._revision_service()
         snapshot = service.prepare(task_id, slot_id, base_id, revision_text)
         preflight = service.preflight(UUID(snapshot["id"]), MODEL)
-        authorize(self.settings, True, "1.00", preflight["cost"])
+        authorize(self.settings, True, self.budget_policy, preflight["cost"])
         return {"snapshot_id": snapshot["id"], "base_image_version_id": str(base_id),
                 "base_sha256": snapshot["context"]["image_inputs"][0]["sha256"],
                 "revision_text": snapshot["context"]["revision_text"], "quote_token": self._quote(preflight),
-                "model": MODEL, "estimate_usd": preflight["cost"]["planning_envelope_usd"], "max_cost_usd": "1.00"}
+                "model": MODEL, "estimate_usd": preflight["cost"]["planning_envelope_usd"], "max_cost_usd": None if self.settings.environment == "pilot" else "1.00"}
 
-    def submit_revision(self, task_id, slot_id, operation_id, snapshot_id, quote_token, max_cost_usd):
+    def submit_revision(self, task_id, slot_id, operation_id, snapshot_id, quote_token, max_cost_usd=None):
+        max_cost_usd = self.budget_policy if self.settings.environment == "pilot" or max_cost_usd is None else max_cost_usd
         self._slot(task_id, slot_id)
         old = self.dispatcher.replay(operation_id, task_id, slot_id, quote_token, max_cost_usd)
         if old:
@@ -238,8 +244,8 @@ class GenerationApplication:
         if snapshot["task_id"] != str(task_id) or snapshot["slot_id"] != str(slot_id) or snapshot["capability"] != "C07":
             raise Conflict("修改快照不属于当前图位或操作。")
         preflight = self._revision_service().preflight(snapshot_id, MODEL)
-        if self._quote(preflight) != quote_token or max_cost_usd != "1.00":
-            raise Conflict("修改内容、来源或费用已变化；请重新核对。")
+        if self._quote(preflight) != quote_token or max_cost_usd != self.budget_policy:
+            raise Conflict("修改内容或来源已变化；请重新核对。")
         authorize(self.settings, True, max_cost_usd, preflight["cost"])
         receipt = self.dispatcher.submit(operation_id, task_id, slot_id, snapshot_id, quote_token, max_cost_usd)
         return {"operation_id": receipt["operation_id"], "state": receipt["state"]}

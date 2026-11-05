@@ -29,8 +29,9 @@ def load_openai_credentials() -> str:
         if not _valid_key(existing):
             raise CredentialConfigError("OPENAI_API_KEY 进程配置格式无效；未用文件覆盖。")
         return "KEY_CONFIGURED"
+    path = Path(os.environ.get("AIGC_PRIVATE_KEY_FILE", str(BACKEND_ENV_FILE))).expanduser()
     try:
-        descriptor = os.open(BACKEND_ENV_FILE, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return "KEY_MISSING"
     except OSError:
@@ -82,6 +83,11 @@ class Settings:
     enable_c01_testing: bool = False
     enable_c01_real: bool = False
     enable_workspace_generation: bool = False
+    pilot_hosts: tuple[str, ...] = ()
+    pilot_networks: tuple[str, ...] = ()
+    frontend_dist: Path | None = None
+    runtime_root: Path | None = None
+    archived_runtime_root: Path | None = None
 
     @property
     def database_path(self) -> Path:
@@ -100,4 +106,9 @@ class Settings:
         return cls(path.resolve(), origins, os.environ.get("AIGC_ENV", "development"),
                    os.environ.get("AIGC_ENABLE_C01_TESTING", "0") == "1",
                    os.environ.get("AIGC_ENABLE_C01_REAL", "0") == "1",
-                   os.environ.get("AIGC_ENABLE_WORKSPACE_GENERATION", "0") == "1")
+                   os.environ.get("AIGC_ENABLE_WORKSPACE_GENERATION", "0") == "1",
+                   tuple(filter(None, os.environ.get("AIGC_PILOT_HOSTS", "").split(","))),
+                   tuple(filter(None, os.environ.get("AIGC_PILOT_NETWORKS", "").split(","))),
+                   Path(os.environ["AIGC_FRONTEND_DIST"]).expanduser().resolve() if os.environ.get("AIGC_FRONTEND_DIST") else None,
+                   Path(os.environ["AIGC_RUNTIME_ROOT"]).expanduser().resolve() if os.environ.get("AIGC_RUNTIME_ROOT") else None,
+                   Path(os.environ["AIGC_ARCHIVED_RUNTIME_ROOT"]).expanduser() if os.environ.get("AIGC_ARCHIVED_RUNTIME_ROOT") else None)

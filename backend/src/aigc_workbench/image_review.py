@@ -69,7 +69,7 @@ class ReviewStore:
                                                    "AND decision='PASS'", (str(version_id),)).fetchone():
                 raise Conflict("已Pass版本保留历史通过记录；本轮不提供撤销Pass。请审核新的候选。")
             body = {**intent, "id": str(uuid4()), "operation_id": str(operation_id), "reviewed_at": now(),
-                    "image_sha256": candidate["image"]["sha256"]}
+                    "image_sha256": candidate["image"]["sha256"], "reviewer_identity": "UNVERIFIED_OPERATOR_LABEL"}
             db.execute("INSERT INTO image_reviews VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", (
                 body["id"], str(operation_id), str(task_id), str(slot_id), str(version_id), decision,
                 reviewer, body["reviewed_at"], feedback, body["image_sha256"], source, canonical(body), fingerprint(body)))

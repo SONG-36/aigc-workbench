@@ -46,7 +46,8 @@ class C01TestAdapter:
 class C01Service:
     def __init__(self, settings: Settings, tasks: TaskService, evidence: C01EvidenceStore,
                  source_root: Path = REPOSITORY_ROOT):
-        require_development(settings)
+        if settings.environment != "pilot" or not settings.enable_workspace_generation:
+            require_development(settings)
         self.tasks, self.evidence, self.source_root = tasks, evidence, source_root
 
     def prepare(self, task_id: UUID, asset_id: UUID) -> dict:

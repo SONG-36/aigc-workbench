@@ -15,6 +15,7 @@ from .c01_model import MODEL as UNDERSTANDING_MODEL, OpenAIResponsesTransport, c
 from .c01_real import C01RealService
 from .c06_candidates import CandidateStore
 from .file_storage import inspect_image
+from .source_paths import archived_path
 from .quick_a_creation_decision import QuickACreationDecisionService
 
 MODEL = "gpt-image-2.6-sunburst"
@@ -79,22 +80,23 @@ class C06Service(C01RealService):
         snapshot = decision["snapshot"]
         files = ["05_C06_EXECUTION_HANDOFF.md", "05_C06_EXECUTION_HANDOFF.json",
                  "04_QUALITY_AMENDMENTS.md", "04_QUALITY_AMENDMENTS.json", "structured-result.json"]
-        manifest = json.loads((handoff_directory / "delivery-manifest-final.json").read_text())
+        local_directory = archived_path(self.settings, handoff_directory)
+        manifest = json.loads((local_directory / "delivery-manifest-final.json").read_text())
         sources = []
         for name in files:
             path = handoff_directory / name
-            digest = sha256(path.read_bytes()).hexdigest()
+            digest = sha256(archived_path(self.settings, path).read_bytes()).hexdigest()
             if digest != manifest[name]["sha256"]:
                 raise C01Error("C06_HANDOFF_CHANGED", "SOURCE_SELECTION", "归档制作交接文件哈希不一致。")
             sources.append({"file": str(path.resolve()), "sha256": digest,
                             "authority": "ORIGINAL_MODEL_OUTPUT" if name == "structured-result.json"
                             else "ASSISTANT_QUALITY_AMENDMENT / USER_CONSTRAINTS / REVIEW_PENDING"})
-        handoff = json.loads((handoff_directory / files[1]).read_text())
+        handoff = json.loads((local_directory / files[1]).read_text())
         prompt = handoff["image_creation_decision"]["C06_creation_input"]
         if (handoff["task_id"] != snapshot["task_id"] or handoff["slot_id"] != snapshot["slot_id"]
                 or handoff["output_size"] != "1024x1536" or handoff["C06_executed"] is not False
                 or handoff["status"] != "PROPOSED / REVIEW PENDING / NOT OPERATOR APPROVED"
-                or not prompt or prompt not in (handoff_directory / files[0]).read_text()
+                or not prompt or prompt not in (local_directory / files[0]).read_text()
                 or [item["sha256"] for item in handoff["images_in_order"]]
                 != [item["sha256"] for item in snapshot["context"]["image_inputs"]]):
             raise C01Error("C06_HANDOFF_MISMATCH", "SOURCE_SELECTION", "制作交接身份、尺寸、状态或双图不一致。")
@@ -105,7 +107,7 @@ class C06Service(C01RealService):
         run = self.store.inspect(UUID(rows[0]["id"]))
         if (run["status"] != "SUCCEEDED" or run["transport_label"] != "REAL_PROVIDER_TRANSPORT"
                 or run["snapshot_sha256"] != fingerprint(snapshot)
-                or run["structured_output"]["content"] != json.loads((handoff_directory / "structured-result.json").read_text())):
+                or run["structured_output"]["content"] != json.loads((local_directory / "structured-result.json").read_text())):
             raise C01Error("C06_DECISION_RUN_MISMATCH", "SOURCE_SELECTION", "原始模型制作决定与归档不一致。")
         return {"decision_snapshot": snapshot, "decision_run_id": run["run_id"],
                 "sources": sources, "prompt": prompt,
@@ -169,13 +171,16 @@ class C06Service(C01RealService):
 
     def run(self, snapshot_id: UUID, model: str, operation_id: UUID, *, confirmed: bool,
             max_cost_usd: str, transport=None) -> dict:
+        pilot = self.settings.environment == "pilot" and max_cost_usd == "UNRESTRICTED_PILOT"
         try:
             budget = Decimal(max_cost_usd)
             valid_budget = budget.is_finite() and 0 < budget <= 1
         except (ValueError, ArithmeticError, TypeError):
             valid_budget = False
-        if os.environ.get("AIGC_ENABLE_C06_REAL") != "1" or not valid_budget:
-            raise C01Error("C06_EXECUTION_DISABLED", "ACCESS", "需显式启用C06，且本次估算门槛不超过USD1。")
+        if os.environ.get("AIGC_ENABLE_C06_REAL") != "1" or not (pilot or valid_budget):
+            raise C01Error("C06_EXECUTION_DISABLED", "ACCESS",
+                           "Pilot真实图像执行未启用或执行策略不一致。" if self.settings.environment == "pilot"
+                           else "需显式启用C06，且本次估算门槛不超过USD1。")
         record = super().run(snapshot_id, model, operation_id, confirmed=confirmed,
                              max_cost_usd=max_cost_usd, transport=transport or OpenAIImageEditsTransport())
         if record["status"] == "SUCCEEDED" and record["transport_label"] == "REAL_PROVIDER_TRANSPORT":

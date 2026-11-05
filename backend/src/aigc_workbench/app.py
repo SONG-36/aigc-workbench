@@ -17,6 +17,7 @@ from .file_storage import LocalImageFiles
 from .persistence import SQLiteTaskStore
 from .generation_application import GenerationApplication
 from .c01_context import C01Error
+from .pilot_http import pilot_boundary, peer_allowed, attach_frontend
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,8 @@ def error(status: int, code: str, message: str, **extra) -> JSONResponse:
 
 def create_app(settings: Settings | None = None, *, generation_transport=None) -> FastAPI:
     settings = settings or Settings.from_environment()
+    pilot = settings.environment == "pilot"
+    networks = pilot_boundary(settings) if pilot else ()
     store = SQLiteTaskStore(settings.database_path)
     files = LocalImageFiles(settings.data_dir)
 
@@ -48,17 +51,24 @@ def create_app(settings: Settings | None = None, *, generation_transport=None) -
         finally:
             app.state.generation_service.dispatcher.close()
 
-    app = FastAPI(title="AIGC Workbench · Quick-A", lifespan=lifespan)
+    app = FastAPI(title="AIGC Workbench · Quick-A", lifespan=lifespan,
+                  docs_url=None if pilot else "/docs", redoc_url=None if pilot else "/redoc",
+                  openapi_url=None if pilot else "/openapi.json")
 
     @app.middleware("http")
     async def local_development_boundary(request: Request, call_next):
-        if request.url.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        if pilot and (request.url.hostname not in settings.pilot_hosts or not request.client
+                      or not peer_allowed(request.client.host, networks)):
+            return error(403, "PILOT_NETWORK_DENIED", "该地址不在已确认的内部Pilot访问范围。")
+        if pilot and any(name == "forwarded" or name.startswith("x-forwarded-") for name in request.headers):
+            return error(403, "PILOT_PROXY_DENIED", "Pilot仅允许已确认局域网内直接访问。")
+        if not pilot and request.url.hostname not in {"127.0.0.1", "localhost", "::1"}:
             return error(403, "LOCAL_ONLY", "当前仅支持本机开发访问。")
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             origin = request.headers.get("origin")
             same_origin = str(request.base_url).rstrip("/")
             if request.headers.get("sec-fetch-site") == "cross-site" or (
-                origin and origin not in {*settings.allowed_origins, same_origin}
+                origin and origin not in ({same_origin} if pilot else {*settings.allowed_origins, same_origin})
             ):
                 return error(403, "ORIGIN_DENIED", "该来源不能写入本地任务。")
         return await call_next(request)
@@ -103,4 +113,6 @@ def create_app(settings: Settings | None = None, *, generation_transport=None) -
         return error(500, "INTERNAL_ERROR", "服务发生错误，未确认保存成功，请查询任务后再操作。")
 
     app.include_router(router)
+    if pilot:
+        attach_frontend(app, settings.frontend_dist)
     return app
