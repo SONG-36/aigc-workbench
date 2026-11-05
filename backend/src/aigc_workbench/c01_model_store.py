@@ -49,7 +49,8 @@ class C01ModelStore:
                 "request_sha256": request_hash, "planned_model_input": request,
                 "image_source": snapshot["prompt"]["planned_model_input"]["images"][0],
                 "provider": "OpenAI", "requested_model": request["model"],
-                "endpoint": "https://api.openai.com/v1/responses",
+                "endpoint": ("https://api.openai.com/v1/images/edits" if snapshot["capability"] == "C06"
+                             else "https://api.openai.com/v1/responses"),
                 "cost_preflight": quote, "user_max_cost_usd": budget, "max_calls": 1,
                 "automatic_retries": 0, "actual_model_input": None, "actual_model_response": None,
                 "model_api_call_attempted": False, "dispatch_state": "NOT_DISPATCHED",
@@ -59,10 +60,10 @@ class C01ModelStore:
                 "business_state_changed": False, "human_evaluation": "NOT_PERFORMED",
                 "note": "RUNNING 只表示未可靠完成，可能进程已结束；禁止自动或盲目重新付费。",
             }
-            if snapshot["capability"] in {"C02", "C03_C04_C05"}:
+            if snapshot["capability"] in {"C02", "C03_C04_C05", "C06"}:
                 record.update(capability=snapshot["capability"], task_id=snapshot["task_id"], slot_id=snapshot["slot_id"],
                               reference_asset_id=snapshot["reference_asset_id"])
-            if snapshot["capability"] == "C03_C04_C05":
+            if snapshot["capability"] in {"C03_C04_C05", "C06"}:
                 record.update(product_asset_id=snapshot["product_asset_id"],
                               image_sources=snapshot["prompt"]["planned_model_input"]["images"],
                               upstream_run_ids=snapshot["upstream_run_ids"])

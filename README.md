@@ -438,3 +438,19 @@ C01 初步评价仅作待人工复核的质量记录；后续不得仅凭其不�
 入口为 prepare-creation-decision（显式 Task/Slot/两张 Asset/两个上游 Run/两份初评）、preflight-creation-decision、run-creation-decision。
 真实命令仍须 development、两个既有显式开关、付费确认、一次操作身份及预算；没有自动重试或模型切换。
 运行产物保存在被忽略的 `.runtime/creation-decision/`，两个可读成果及 C06 输入由真实模型结果导出，不能以人工补写冒充模型输出。
+
+### C06：当前主图的一次真实候选
+
+[c06_generation.py](backend/src/aigc_workbench/c06_generation.py) 复用既有单次执行、代理感知 HTTPS、凭证与 Evidence。
+固定 `gpt-image-2.6-sunburst`，调用 `/v1/images/edits`；两张真实原图按商品、营销参考顺序以 JSON Data URL 发送。
+参数为 `1024x1536`、`quality=high`、`complexity=high`、`n=1`、`stream=false`、`output_format=png`，不设置 `input_fidelity`。
+完整制作指令来自已归档的 C06 交接文件，原始模型决定和助手质量修订分别记录路径、哈希与权威状态。
+
+开发入口：`backend/.venv/bin/python -m aigc_workbench.c06_cli`，提供 `prepare`、`preflight`、`run`、`inspect-candidate`。
+真实 `run` 还需要既有 development/C01 显式开关、`AIGC_ENABLE_C06_REAL=1`、指定模型、全新 Operation ID、`--confirm-paid-call` 和 `--max-cost-usd 1.00`。
+预算是本地估算守卫：官方输出计算器与当前费率，加上明确标注的本地输入规划余量，不是供应商账单上限。
+无自动重试、模型切换、第二张生成或运营 Pass；超时保留 `OUTCOME_UNKNOWN`，同一操作不会再次发送付费请求。
+
+SQLite V5 仅增加不可变 `image_versions` 记录，候选 PNG 保存在 `.runtime/f01/image_versions/`，关联真实 Task/Slot/Run/来源，状态固定为 `CANDIDATE_REVIEW_PENDING`。
+若图片本地保存失败，先查已有 Run，使用同一操作恢复本地保存，不能换 Operation ID 重新付费。现有工作台生成按钮仍未启用。
+请求、原始响应及对照评价材料位于被忽略的 `.runtime/c06-real/`，不提交图片、运行数据或凭证。

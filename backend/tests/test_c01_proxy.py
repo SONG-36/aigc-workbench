@@ -13,6 +13,7 @@ import pytest
 from aigc_workbench.c01_cli import main
 from aigc_workbench.c01_context import C01Error, canonical
 from aigc_workbench.c01_model import MODEL, OpenAIResponsesTransport
+from aigc_workbench.c06_generation import OpenAIImageEditsTransport
 
 
 @pytest.fixture(autouse=True)
@@ -75,6 +76,20 @@ def test_https_proxy_connect_preserves_exact_post_bytes_and_verified_tls(monkeyp
     assert request["path"] == "/v1/responses" and request["method"] == "POST"
     assert request["body"] == payload
     assert request["headers"]["Authorization"] == "Bearer synthetic-openai-key"
+
+
+def test_c06_reuses_proxy_tls_and_exact_json_with_larger_image_response(monkeypatch, wire):
+    monkeypatch.setenv("HTTPS_PROXY", "http://expected-proxy.invalid:8118")
+    wire["body"] = b"x" * (3 * 1024 * 1024)
+    payload = b'{"images":[{"image_url":"synthetic-test-only"}],"n":1}'
+    result = OpenAIImageEditsTransport().send(payload)
+    assert result.body == wire["body"] and len(wire["requests"]) == 1
+    assert wire["requests"][0]["path"] == "/v1/images/edits"
+    assert wire["requests"][0]["body"] == payload
+    assert wire["connections"][0]["host"] == "expected-proxy.invalid:8118"
+    assert wire["connections"][0]["timeout"] == 300
+    assert wire["connections"][0]["context"].verify_mode == ssl.CERT_REQUIRED
+    assert wire["connections"][0]["context"].check_hostname is True
 
 
 @pytest.mark.parametrize("no_proxy", ["api.openai.com", ".openai.com", "*", "api.openai.com:443"])

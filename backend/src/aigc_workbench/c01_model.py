@@ -179,8 +179,10 @@ class OpenAIResponsesTransport:
         result, _ = self._request("POST", "/v1/responses", payload)
         return result
 
-    def _request(self, method: str, path: str, payload: bytes | None) -> tuple[HTTPResult, str]:
-        if (method, path) not in {("POST", "/v1/responses"), ("GET", "/v1/models/" + MODEL)}:
+    def _request(self, method: str, path: str, payload: bytes | None, *,
+                 timeout: int = TIMEOUT_SECONDS, max_response_bytes: int = MAX_RESPONSE_BYTES) -> tuple[HTTPResult, str]:
+        if (method, path) not in {("POST", "/v1/responses"), ("POST", "/v1/images/edits"),
+                                  ("GET", "/v1/models/" + MODEL)}:
             raise C01Error("MODEL_TARGET_NOT_ALLOWED", "MODEL_TRANSPORT", "仅允许固定官方 API 目标。")
         if os.environ.get("OPENAI_BASE_URL"):
             raise C01Error("CUSTOM_ENDPOINT_NOT_SUPPORTED", "MODEL_TRANSPORT", "仅支持官方固定 API 目标。")
@@ -199,11 +201,11 @@ class OpenAIResponsesTransport:
             request = urllib.request.Request("https://api.openai.com" + path, data=payload,
                                              headers=headers, method=method)
             try:
-                response = opener.open(request, timeout=TIMEOUT_SECONDS)
+                response = opener.open(request, timeout=timeout)
             except urllib.error.HTTPError as exc:
                 response = exc  # Preserve actual error status/body for existing Run/Evidence handling.
-            body = response.read(MAX_RESPONSE_BYTES + 1)
-            if len(body) > MAX_RESPONSE_BYTES:
+            body = response.read(max_response_bytes + 1)
+            if len(body) > max_response_bytes:
                 raise C01Error("RESPONSE_TOO_LARGE", "MODEL_TRANSPORT", "响应超过本实验读取上限；结果不完整。")
             body = _redact_response(body, key, proxies)
             request_id = response.headers.get("x-request-id")

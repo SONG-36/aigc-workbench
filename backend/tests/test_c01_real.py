@@ -340,6 +340,7 @@ def test_v3_to_v4_migration_preserves_s02_and_rolls_back(experiment, monkeypatch
         db.execute("DROP TRIGGER c01_model_runs_terminal")
         db.execute("DROP TRIGGER c01_model_runs_retain")
         db.execute("DROP TABLE c01_model_runs")
+        db.execute("DROP TABLE image_versions")  # Reconstruct an actual pre-C06 v3 test schema.
         db.execute("PRAGMA user_version=3")
     original = persistence.V4_TABLES
     monkeypatch.setattr(persistence, "V4_TABLES", original + ["INVALID SQL"])
