@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import type { TaskDraft } from '../types'
 
-export function WorkspaceShell({ task, children }: { task: TaskDraft | null; children?: ReactNode }) {
+export function WorkspaceShell({ task, children, output }: { task: TaskDraft | null; children?: ReactNode; output?: ReactNode }) {
   const [inputOpen, setInputOpen] = useState(true)
   return <>
     <div className="heading">
@@ -10,7 +10,7 @@ export function WorkspaceShell({ task, children }: { task: TaskDraft | null; chi
         <p className="muted">共享商品资料，在统一工作台制作与审核图片。</p>
       </div><span className="pill">Quick-A · 准备草稿</span>
     </div>
-    <p className="notice" role="status">当前可保存实际素材与图位配置。图片理解、生成、修改与审核均未开放。</p>
+    <p className="notice" role="status">可保存素材与图位、查看真实候选；具备有效制作决定的图位可显式付费生成。修改与审核尚未开放。</p>
     <details id="input-panel" open={inputOpen} onToggle={event => setInputOpen(event.currentTarget.open)}>
       <summary><span className="eyebrow">INPUT</span><strong>{task?.title || '共享资料与商品理解'}</strong>
         <span className="muted">按需展开</span></summary>
@@ -27,7 +27,7 @@ export function WorkspaceShell({ task, children }: { task: TaskDraft | null; chi
           <h3>已保存的任务</h3>
           <dl><dt>Task ID</dt><dd data-testid="task-id">{task.id}</dd>
             <dt>创建时间</dt><dd>{new Date(task.created_at).toLocaleString()}</dd>
-            <dt>基础素材</dt><dd>{task.materials_ready ? '已有图位基础素材齐备；图片生成仍未开放。'
+            <dt>基础素材</dt><dd>{task.materials_ready ? '已有图位基础素材齐备；生成条件以当前图位的服务器检查为准。'
               : '尚未提供商品图与营销参考，或图位绑定未齐备；不可生成。'}</dd></dl>
         </section>}
         {children}
@@ -38,10 +38,10 @@ export function WorkspaceShell({ task, children }: { task: TaskDraft | null; chi
       <div className="section-head"><div><span className="eyebrow">OUTPUT</span><h2 id="output-title">逐图制作与审核</h2></div>
         <div className="actions"><button type="button" disabled>导出通过的图片（未开放）</button>
           <button type="button" disabled>导出实验包（未开放）</button></div></div>
-      <div className="output-controls"><button type="button" disabled>生成图片（未开放）</button>
-        <span className="muted">素材保存与 AI 执行分开；本版本不会执行 AI。</span></div>
+      {output || <><div className="output-controls"><button type="button" disabled>生成图片（未开放）</button>
+        <span className="muted">请先保存任务、素材和图位，再检查本图的生成条件。</span></div>
       <div className="empty">尚无候选图片。当前仅完成真实素材与图位准备。</div>
-      <p className="muted">历史版本、修改、Pass / Reject 与 Inspector 尚未接通，不提供模拟操作。</p>
+      <p className="muted">历史版本、修改、Pass / Reject 与 Inspector 尚未接通，不提供模拟操作。</p></>}
     </section>
   </>
 }

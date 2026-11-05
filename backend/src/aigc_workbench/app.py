@@ -15,6 +15,8 @@ from .config import Settings
 from .domain import Conflict, InvalidTask
 from .file_storage import LocalImageFiles
 from .persistence import SQLiteTaskStore
+from .generation_application import GenerationApplication
+from .c01_context import C01Error
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,7 @@ def error(status: int, code: str, message: str, **extra) -> JSONResponse:
     })
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, generation_transport=None) -> FastAPI:
     settings = settings or Settings.from_environment()
     store = SQLiteTaskStore(settings.database_path)
     files = LocalImageFiles(settings.data_dir)
@@ -35,12 +37,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         store.initialize()
         files.initialize()
         app.state.task_service = TaskService(store, files)
+        app.state.generation_service = GenerationApplication(settings, app.state.task_service, store,
+                                                              transport=generation_transport)
+        app.state.generation_service.start()
         orphans = app.state.task_service.orphan_files()
         if orphans:
             logger.warning("Unreferenced immutable asset files retained for inspection: %s", orphans)
-        yield
+        try:
+            yield
+        finally:
+            app.state.generation_service.dispatcher.close()
 
-    app = FastAPI(title="AIGC Workbench · S01", lifespan=lifespan)
+    app = FastAPI(title="AIGC Workbench · Quick-A", lifespan=lifespan)
 
     @app.middleware("http")
     async def local_development_boundary(request: Request, call_next):
@@ -73,6 +81,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(Conflict)
     async def conflict(request: Request, exc: Conflict):
         return error(409, "OPERATION_CONFLICT", str(exc))
+
+    @app.exception_handler(C01Error)
+    async def generation_error(request: Request, exc: C01Error):
+        status = 404 if exc.code.endswith("NOT_FOUND") else 503
+        return error(status, exc.code, str(exc))
 
     @app.exception_handler(sqlite3.Error)
     @app.exception_handler(StorageUnavailable)

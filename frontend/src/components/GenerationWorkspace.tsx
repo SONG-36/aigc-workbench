@@ -1,0 +1,132 @@
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import type { ImageSlot, TaskDraft } from '../types'
+import { useSlotGeneration } from '../hooks/useSlotGeneration'
+import type { ExecutionState } from '../api/generation'
+
+const kinds = { main: '主图', comparison: '同类商品对比图', selling_point: '卖点图', scene: '场景图' }
+const labels: Record<ExecutionState, string> = {
+  NOT_STARTED: '尚未开始', RUNNING: '执行中', SUCCEEDED: '成功并产生候选', FAILED: '执行失败', OUTCOME_UNKNOWN: '结果未知',
+}
+
+function Overlay({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null
+    box.current?.querySelector<HTMLButtonElement>('button')?.focus()
+    return () => previous?.focus()
+  }, [])
+  return <div className="overlay" onClick={event => { if (event.target === event.currentTarget) onClose() }}>
+    <div ref={box} className="overlay-panel" role="dialog" aria-modal="true" aria-label={title} onKeyDown={event => {
+      if (event.key === 'Escape') onClose()
+      if (event.key === 'Tab') {
+        const nodes = box.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input')
+        if (!nodes?.length) return
+        const first = nodes[0], last = nodes[nodes.length - 1]
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+        if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+      }
+    }}><div className="section-head"><h3>{title}</h3><button onClick={onClose}>关闭</button></div>{children}</div>
+  </div>
+}
+
+function SlotOutput({ task, slot, locked }: { task: TaskDraft; slot: ImageSlot; locked: boolean }) {
+  const generation = useSlotGeneration(task, slot)
+  const [selected, setSelected] = useState('')
+  const [viewer, setViewer] = useState<{ url: string; title: string } | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const [acknowledged, setAcknowledged] = useState(false)
+  const { data, error, submitting, uncertain } = generation
+  const candidate = data?.candidates.find(c => c.image_version_id === selected) || data?.candidates[0]
+  const ready = data?.readiness
+  const sourceIds = candidate ? [candidate.product_asset_id, candidate.reference_asset_id]
+    : [ready?.product_asset_id, ready?.reference_asset_id || slot.reference_asset_id]
+  const sources = sourceIds.map(id => task.assets.find(a => a.id === id))
+  if (!sources[0]) sources[0] = task.assets.find(a => a.role === 'product_image')
+  const canGenerate = !!ready?.can_generate && !locked && !submitting && !uncertain && !error
+  const latest = data?.executions[0]
+
+  return <div className="slot-output">
+    <div className="output-controls">
+      <button className="primary" disabled={!canGenerate} onClick={() => { setAcknowledged(false); setConfirming(true) }}>
+        {submitting ? '正在提交…' : '生成一张候选（付费）'}</button>
+      <div><span role="status" className="pill">{data ? labels[data.state] : '读取服务器状态…'}</span>
+        <p className="muted">{locked ? '有待保存或待核对的输入，请先处理。' : ready?.reason}</p></div>
+      <button onClick={generation.refresh}>刷新执行状态</button>
+    </div>
+    {error && <p role="alert" className="error">{error}</p>}
+    {uncertain && <p className="notice">提交结果尚未确认，正在查询服务器；不会自动重发付费请求。</p>}
+    {(data?.execution_mode === 'TEST_SUBSTITUTE' || latest?.execution_mode === 'TEST_SUBSTITUTE')
+      && <p className="notice">测试替代工具 · 非真实模型生成</p>}
+    {latest?.error && <p role="alert" className="error">{latest.error.message}（{latest.error.code}
+      {latest.http_status ? ` / HTTP ${latest.http_status}` : ''}）</p>}
+    {data && <div className="candidate-workspace">
+      <div className="candidate-panel">
+        {candidate ? <>
+          <label>历史候选版本<select aria-label="历史候选版本" value={candidate.image_version_id}
+            onChange={event => setSelected(event.target.value)}>
+            {data.candidates.map((c, index) => <option key={c.image_version_id} value={c.image_version_id}>
+              候选 {data.candidates.length - index} · {new Date(c.created_at).toLocaleString()}</option>)}
+          </select></label>
+          <button className="candidate-image" aria-label="放大查看候选原图"
+            onClick={() => setViewer({ url: candidate.url, title: '生成候选 · 原始 PNG' })}>
+            <img src={candidate.url} alt="当前图位的已保存生成候选" /></button>
+          <p className="muted">待人工审核 · {candidate.image.width}×{candidate.image.height} ·
+            {new Date(candidate.created_at).toLocaleString()}</p>
+          <p className="muted">版本 {candidate.image_version_id}</p>
+          <a href={candidate.url} target="_blank" rel="noreferrer">打开原始 PNG</a>
+        </> : <div className="empty">本图位尚无已保存的候选图片。</div>}
+        <p className="muted">查看历史候选不会设为 Pass。修改、Pass / Reject 尚未开放。</p>
+      </div>
+      <aside className="candidate-sources" aria-label="商品与参考来源">
+        <h3>{candidate ? '本候选来源对照' : '当前商品与参考'}</h3>
+        {sources.map((asset, index) => <figure key={index}>
+          <figcaption>{index === 0 ? '实际商品原图' : '绑定的营销参考'}</figcaption>
+          {asset ? <><button aria-label={`放大${index === 0 ? '商品原图' : '营销参考'}`} onClick={() =>
+            setViewer({ url: asset.url, title: index === 0 ? '实际商品原图' : '营销参考原图' })}>
+            <img src={asset.url} alt={index === 0 ? '实售商品来源' : '营销参考来源'} /></button>
+            <p className="muted">{asset.filename}</p></> : <p className="muted">来源尚未具备</p>}
+        </figure>)}
+      </aside>
+    </div>}
+    {!!data?.executions.length && <details className="execution-history"><summary>执行记录 · {data.executions.length}</summary>
+      {data.executions.map(e => <div key={e.operation_id} className="execution-row">
+        <p>{labels[e.state]} · {new Date(e.created_at).toLocaleString()}
+          {e.execution_mode === 'TEST_SUBSTITUTE' ? ' · 测试替代工具' : ''}</p>
+        <p className="muted">{e.model} · Run {e.run_id || '尚未进入模型执行'}
+          {e.duration_ms !== null ? ` · ${(e.duration_ms / 1000).toFixed(2)} 秒` : ''}</p>
+        {e.error && <p className="error">{e.error.message}（{e.error.code}）</p>}
+      </div>)}
+    </details>}
+    {viewer && <Overlay title={viewer.title} onClose={() => setViewer(null)}>
+      <img className="full-image" src={viewer.url} alt={viewer.title} />
+      <a href={viewer.url} target="_blank" rel="noreferrer">新窗口查看原始文件</a>
+    </Overlay>}
+    {confirming && ready && <Overlay title="确认一次付费生图" onClose={() => setConfirming(false)}>
+      {data?.execution_mode === 'TEST_SUBSTITUTE' && <p className="notice">测试替代工具 · 不调用真实 API</p>}
+      <p>仅为当前「{kinds[slot.kind]}」生成 1 张待审候选，使用当前已保存的商品、参考与制作决定。</p>
+      <p>模型：{ready.model}</p><p>本地规划估算 USD {ready.estimate_usd}；执行估算门槛 USD {ready.max_cost_usd}。</p>
+      <p className="muted">估算门槛不是供应商账单硬上限。不会自动重试；新候选不会自动 Pass。</p>
+      <label className="paid-ack"><input type="checkbox" checked={acknowledged}
+        onChange={event => setAcknowledged(event.target.checked)} />我了解这是一次付费调用</label>
+      <button className="primary" disabled={!acknowledged || !canGenerate} onClick={() => {
+        setConfirming(false); void generation.submit()
+      }}>确认付费，生成 1 张</button>
+    </Overlay>}
+  </div>
+}
+
+export function GenerationWorkspace({ task, locked, unsavedSlots }: {
+  task: TaskDraft; locked: boolean; unsavedSlots: Set<string>
+}) {
+  const [search, setSearch] = useSearchParams()
+  const selected = task.slots.find(s => s.id === search.get('slot')) || task.slots[0]
+  if (!selected) return <><button disabled>生成一张候选（付费）</button>
+    <div className="empty">请先保存一个图位；尚未开始生成。</div></>
+  return <div className="output-layout"><nav className="output-slots" aria-label="选择制作图位">
+    {task.slots.map(s => <button key={s.id} aria-pressed={s.id === selected.id} onClick={() => {
+      setSearch(previous => { const next = new URLSearchParams(previous); next.set('slot', s.id); return next }, { replace: true })
+    }}>{kinds[s.kind]}{['selling_point', 'scene'].includes(s.kind)
+      ? ` ${task.slots.filter(item => item.kind === s.kind).findIndex(item => item.id === s.id) + 1}` : ''}</button>)}
+  </nav><SlotOutput key={selected.id} task={task} slot={selected} locked={locked || unsavedSlots.has(selected.id)} /></div>
+}

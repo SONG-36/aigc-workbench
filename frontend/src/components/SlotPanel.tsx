@@ -18,8 +18,9 @@ function AddSlot({ task, kind, label, write, onSaved }: {
   }}>＋ 添加{label}</button>
 }
 
-function SlotEditor({ task, slot, label, write, onSaved }: {
+function SlotEditor({ task, slot, label, write, onSaved, onDirty }: {
   task: TaskDraft; slot: ImageSlot; label: string; write: WriteAction; onSaved: (task: TaskDraft) => void
+  onDirty?: (slotId: string, dirty: boolean) => void
 }) {
   const [reference, setReference] = useState(slot.reference_asset_id || '')
   const [size, setSize] = useState(slot.output_size)
@@ -32,6 +33,8 @@ function SlotEditor({ task, slot, label, write, onSaved }: {
   const selected = references.find(a => a.id === reference)
   const dirty = reference !== (slot.reference_asset_id || '') || size !== slot.output_size
     || requirements !== slot.requirements
+  useEffect(() => { onDirty?.(slot.id, dirty) }, [slot.id, dirty, onDirty])
+  useEffect(() => () => onDirty?.(slot.id, false), [slot.id, onDirty])
   return <form className="slot-shell" data-slot-id={slot.id} onSubmit={event => {
     event.preventDefault()
     void write.run(() => configureSlot(task.id, slot, {
@@ -59,8 +62,9 @@ function SlotEditor({ task, slot, label, write, onSaved }: {
   </form>
 }
 
-export function SlotPanel({ task, write, onSaved }: {
+export function SlotPanel({ task, write, onSaved, onDirty }: {
   task: TaskDraft; write: WriteAction; onSaved: (task: TaskDraft) => void
+  onDirty?: (slotId: string, dirty: boolean) => void
 }) {
   function group(kind: SlotKind, label: string) {
     const slots = task.slots.filter(s => s.kind === kind)
@@ -68,7 +72,7 @@ export function SlotPanel({ task, write, onSaved }: {
     return <div className="slot-group" key={kind}><h4>{label} · {slots.length} 个</h4>
       <div className={fixed ? 'fixed-slot' : 'slot-grid'}>{slots.map((s, index) =>
         <SlotEditor key={s.id} task={task} slot={s} label={fixed ? label : `${label} ${index + 1}`}
-          write={write} onSaved={onSaved} />)}
+          write={write} onSaved={onSaved} onDirty={onDirty} />)}
         {(!fixed || slots.length === 0) && <AddSlot task={task} kind={kind} label={label}
           write={write} onSaved={onSaved} />}</div>
     </div>

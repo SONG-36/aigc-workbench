@@ -32,10 +32,10 @@ export function TaskCenter() {
       {loading && <p role="status">正在读取任务…</p>}
       {error && <p role="alert" className="error">{error}</p>}
       {!loading && !error && <div className="task-list">
-        {tasks.length === 0 && <p className="empty">尚无任务。可创建 Quick-A 草稿并保存素材；图片制作尚未开放。</p>}
+        {tasks.length === 0 && <p className="empty">尚无任务。可创建 Quick-A 草稿并保存素材，在工作台查看图位与制作条件。</p>}
         {tasks.map(task => <article className="task-row" key={task.id}>
           <div><h3>{task.title}</h3><p className="muted">Quick-A｜同款快速改版 · {new Date(task.created_at).toLocaleString()}</p>
-            <p>{task.assets.length} 张已保存素材 · {task.slots.length} 个图位 · 图片生成未开放</p></div>
+            <p>{task.assets.length} 张已保存素材 · {task.slots.length} 个图位 · 打开工作台查看候选与生成条件</p></div>
           <Link className="secondary button-link" to={`/workspace/${task.id}`}>打开 / 继续任务</Link>
         </article>)}
       </div>}

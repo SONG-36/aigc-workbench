@@ -21,7 +21,8 @@ def load_openai_credentials() -> str:
     """Existing nonblank process key wins; otherwise load only OPENAI_API_KEY from a private file.
 
     No shell evaluation, interpolation, arbitrary env loading, logging, or frontend injection.
-    Called explicitly after the C01 developer gate, never by Settings/app startup/import.
+    Called by the gated developer CLI or explicitly enabled development Workspace execution.
+    Settings/imports and the default (generation-disabled) app never load credentials.
     """
     existing = os.environ.get("OPENAI_API_KEY", "").strip()
     if existing:
@@ -80,6 +81,7 @@ class Settings:
     environment: str = "development"
     enable_c01_testing: bool = False
     enable_c01_real: bool = False
+    enable_workspace_generation: bool = False
 
     @property
     def database_path(self) -> Path:
@@ -97,4 +99,5 @@ class Settings:
         )))
         return cls(path.resolve(), origins, os.environ.get("AIGC_ENV", "development"),
                    os.environ.get("AIGC_ENABLE_C01_TESTING", "0") == "1",
-                   os.environ.get("AIGC_ENABLE_C01_REAL", "0") == "1")
+                   os.environ.get("AIGC_ENABLE_C01_REAL", "0") == "1",
+                   os.environ.get("AIGC_ENABLE_WORKSPACE_GENERATION", "0") == "1")

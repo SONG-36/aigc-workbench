@@ -4,7 +4,7 @@ export class ApiError extends Error {
   constructor(message: string, readonly outcome: 'rejected' | 'unknown') { super(message) }
 }
 
-async function request(path: string, options: RequestInit = {}): Promise<unknown> {
+export async function request(path: string, options: RequestInit = {}): Promise<unknown> {
   const write = options.method === 'POST' || options.method === 'PUT'
   let response: Response
   try { response = await fetch(`/api${path}`, options) }

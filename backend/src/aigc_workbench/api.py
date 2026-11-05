@@ -12,6 +12,7 @@ from starlette.requests import ClientDisconnect
 from .application import TaskService
 from .domain import Asset, AssetRole, SlotKind, Task
 from .file_storage import MAX_UPLOAD_BYTES
+from .generation_application import GenerationApplication
 
 router = APIRouter(prefix="/api")
 
@@ -101,9 +102,44 @@ def task_service(request: Request) -> TaskService:
 Service = Annotated[TaskService, Depends(task_service)]
 
 
+def generation_service(request: Request) -> GenerationApplication:
+    return request.app.state.generation_service
+
+
+Generation = Annotated[GenerationApplication, Depends(generation_service)]
+
+
+class GenerateImageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operation_id: UUID
+    quote_token: str = Field(strict=True, pattern=r"^[a-f0-9]{64}$")
+    confirm_paid: Literal[True]
+    max_cost_usd: Literal["1.00"]
+
+
+@router.get("/tasks/{task_id}/slots/{slot_id}/workspace")
+def slot_workspace(task_id: UUID, slot_id: UUID, service: Generation):
+    return service.workspace(task_id, slot_id)
+
+
+@router.post("/tasks/{task_id}/slots/{slot_id}/generations", status_code=202)
+def generate_image(task_id: UUID, slot_id: UUID, body: GenerateImageRequest, service: Generation):
+    return service.submit(task_id, slot_id, body.operation_id, body.quote_token, body.max_cost_usd)
+
+
+@router.get("/tasks/{task_id}/slots/{slot_id}/versions/{version_id}/content")
+def candidate_content(task_id: UUID, slot_id: UUID, version_id: UUID, service: Generation):
+    body, content = service.content(task_id, slot_id, version_id)
+    return Response(content, media_type="image/png", headers={
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store",
+        "ETag": '"' + body["image"]["sha256"] + '"',
+        "Content-Disposition": f'inline; filename="{version_id}.png"',
+    })
+
+
 @router.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "scope": "S01 assets and slots; no AI execution"}
+    return {"status": "ok", "scope": "Quick-A workspace; controlled C06 generation"}
 
 
 @router.post("/tasks", response_model=TaskResponse, status_code=201)

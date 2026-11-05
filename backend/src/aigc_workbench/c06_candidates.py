@@ -8,7 +8,9 @@ from pathlib import Path
 from uuid import UUID, uuid5
 
 from .c01_context import C01Error, canonical, fingerprint, now
-from .file_storage import inspect_image
+from .file_storage import MAX_UPLOAD_BYTES, inspect_image
+from .application import TaskNotFound
+from .c01_model_store import C01ModelStore
 
 
 def private_write(path: Path, content: bytes) -> None:
@@ -25,6 +27,42 @@ class CandidateStore:
         self.database = database
         self.directory = data_dir / "image_versions"
 
+    def _read_png(self, version_id: UUID) -> bytes:
+        try:
+            descriptor = os.open(self.directory / (version_id.hex + ".png"), os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(descriptor, "rb") as stream:
+                return stream.read(MAX_UPLOAD_BYTES + 1)
+        except OSError as exc:
+            raise C01Error("CANDIDATE_IMAGE_UNAVAILABLE", "CANDIDATE_QUERY", "候选PNG无法安全读取。") from exc
+
+    def read_for_slot(self, task_id: UUID, slot_id: UUID, version_id: UUID) -> tuple[dict, bytes]:
+        # Scope before opening any file. Never use the persisted absolute 'file' as an input path.
+        with self.database.connection() as db:
+            row = db.execute("SELECT id FROM image_versions WHERE id=? AND task_id=? AND slot_id=?",
+                             (str(version_id), str(task_id), str(slot_id))).fetchone()
+        if row is None:
+            raise TaskNotFound("当前图位没有该候选版本。")
+        body = self.inspect(version_id)
+        with self.database.connection() as db:
+            slot = db.execute("SELECT task_id FROM image_slots WHERE id=?", (str(slot_id),)).fetchone()
+            assets = db.execute("SELECT id,role FROM assets WHERE task_id=? AND id IN (?,?)",
+                                (str(task_id), body["product_asset_id"], body["reference_asset_id"])).fetchall()
+        run = C01ModelStore(self.database).inspect(UUID(body["run_id"]))
+        if (slot is None or slot["task_id"] != str(task_id)
+                or {r["id"]: r["role"] for r in assets} != {
+                    body["product_asset_id"]: "product_image", body["reference_asset_id"]: "marketing_reference"}
+                or run.get("capability") != "C06" or run["status"] != "SUCCEEDED"
+                or run.get("task_id") != str(task_id) or run.get("slot_id") != str(slot_id)
+                or run.get("product_asset_id") != body["product_asset_id"]
+                or run.get("reference_asset_id") != body["reference_asset_id"]
+                or run["snapshot_id"] != body["snapshot_id"]
+                or run["structured_output"]["content"]["image"] != body["image"]):
+            raise C01Error("CANDIDATE_ASSOCIATION_INVALID", "CANDIDATE_QUERY", "候选来源或执行关联不一致。")
+        content = self._read_png(version_id)
+        if asdict(inspect_image(content, "image/png")) != body["image"]:
+            raise C01Error("CANDIDATE_IMAGE_CORRUPT", "CANDIDATE_QUERY", "候选文件身份或图片格式不一致。")
+        return body, content
+
     def inspect(self, version_id: UUID) -> dict:
         with self.database.connection() as db:
             row = db.execute("SELECT * FROM image_versions WHERE id=?", (str(version_id),)).fetchone()
@@ -34,8 +72,8 @@ class CandidateStore:
         if (fingerprint(body) != row["body_sha256"] or body["image_version_id"] != row["id"]
                 or any(body[key] != row[key] for key in ("candidate_id", "task_id", "slot_id", "run_id", "status"))):
             raise C01Error("CANDIDATE_CORRUPT", "CANDIDATE_QUERY", "候选来源记录不一致。")
-        path = self.directory / (UUID(body["image_version_id"]).hex + ".png")
-        if path.is_symlink() or sha256(path.read_bytes()).hexdigest() != body["image"]["sha256"]:
+        content = self._read_png(UUID(body["image_version_id"]))
+        if len(content) != body["image"]["size_bytes"] or sha256(content).hexdigest() != body["image"]["sha256"]:
             raise C01Error("CANDIDATE_IMAGE_CORRUPT", "CANDIDATE_QUERY", "候选PNG完整性失败。")
         return body
 

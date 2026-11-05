@@ -130,7 +130,7 @@ describe('S01 deterministic UI contracts with explicit HTTP mocks', () => {
     expect(screen.queryByAltText('待上传预览：product.png')).not.toBeInTheDocument()
     expect(revoke).toHaveBeenCalledWith('blob:local-preview')
     expect(fetchMock.mock.calls[1][1].body).toBe(file)
-    expect(screen.getByRole('button', { name: '生成图片（未开放）' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成一张候选（付费）' })).toBeDisabled()
   })
 
   it('releases local preview on unmount and ignores a late upload response', async () => {
@@ -178,7 +178,13 @@ describe('S01 deterministic UI contracts with explicit HTTP mocks', () => {
       position: 0, reference_asset_id: null, output_size: '1024x1536', requirements: '', inputs_ready: false }
     const current = { ...task, assets: [asset, reference], slots: [slot] }
     const updated = { ...current, materials_ready: true, slots: [{ ...slot, reference_asset_id: reference.id, inputs_ready: true }] }
-    const fetchMock = vi.fn().mockResolvedValueOnce(json(current)).mockResolvedValueOnce(json(updated))
+    const fetchMock = vi.fn().mockImplementation((path, options) => {
+      if (path.endsWith('/workspace')) return Promise.resolve(json({
+        task_id: task.id, slot_id: slot.id, state: 'NOT_STARTED', candidates: [], executions: [],
+        readiness: { can_generate: false, reason: '无有效制作决定' },
+      }))
+      return Promise.resolve(json(options?.method === 'PUT' ? updated : current))
+    })
     vi.stubGlobal('fetch', fetchMock)
     mount(`/workspace/${task.id}`)
     await screen.findByTestId('task-id')
@@ -187,8 +193,9 @@ describe('S01 deterministic UI contracts with explicit HTTP mocks', () => {
     expect(screen.getByText(/有未保存配置/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '保存主图配置' }))
     expect(await screen.findByText(/图位配置已保存 · 本图基础素材齐备/)).toBeInTheDocument()
-    expect(fetchMock.mock.calls[1][0]).toBe(`/api/tasks/${task.id}/slots/${slot.id}`)
-    expect(JSON.parse(fetchMock.mock.calls[1][1].body).reference_asset_id).toBe(reference.id)
-    expect(screen.getByRole('button', { name: '生成图片（未开放）' })).toBeDisabled()
+    const saved = fetchMock.mock.calls.find(([, options]) => options?.method === 'PUT')!
+    expect(saved[0]).toBe(`/api/tasks/${task.id}/slots/${slot.id}`)
+    expect(JSON.parse(saved[1].body).reference_asset_id).toBe(reference.id)
+    expect(screen.getByRole('button', { name: '生成一张候选（付费）' })).toBeDisabled()
   })
 })
