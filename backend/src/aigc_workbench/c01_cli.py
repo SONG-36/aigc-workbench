@@ -13,7 +13,7 @@ from .c01_persistence import C01EvidenceStore
 from .c01_prompt import readable_request
 from .c01_real import C01RealService, preflight_report
 from .c01_model_store import C01ModelStore
-from .config import Settings
+from .config import CredentialConfigError, Settings, load_openai_credentials
 from .file_storage import LocalImageFiles
 from .persistence import SQLiteTaskStore
 
@@ -46,6 +46,7 @@ def parser() -> argparse.ArgumentParser:
             real.add_argument("--max-cost-usd", required=True)
     model_run = commands.add_parser("inspect-model-run")
     model_run.add_argument("--run-id", type=UUID, required=True)
+    commands.add_parser("credential-status")
     return cli
 
 
@@ -54,6 +55,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         settings = Settings.from_environment()
         require_development(settings)  # Check before DB access, migration or directory creation.
+        if args.command in {"credential-status", "preflight-real", "run-real"}:
+            key_status = load_openai_credentials()
+            if args.command == "credential-status":
+                print(key_status)
+                return 0 if key_status == "KEY_CONFIGURED" else 2
         if not settings.database_path.is_file():
             raise C01Error("BUSINESS_DATABASE_MISSING", "SOURCE_SELECTION", "需要现有 S01 数据库。")
         database = SQLiteTaskStore(settings.database_path)
@@ -85,10 +91,14 @@ def main(argv: list[str] | None = None) -> int:
             service.tasks.get_draft(args.task_id)
             result = evidence.history(args.task_id)
             result["orphan_snapshot_images"] = evidence.orphan_snapshot_images()
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        output = model_run_report(result) if args.command in {"run-real", "inspect-model-run"} else result
+        print(json.dumps(output, ensure_ascii=False, indent=2))
         failed = ((args.command == "run" and result["run"]["status"] != "SUCCEEDED")
                   or (args.command == "run-real" and result["status"] != "SUCCEEDED"))
         return 1 if failed else 0
+    except CredentialConfigError as exc:
+        print(json.dumps({"error": {"code": "CREDENTIAL_CONFIG_INVALID", "stage": "ACCESS",
+                                   "message": str(exc)}}, ensure_ascii=False), file=sys.stderr)
     except C01Error as exc:
         print(json.dumps({"error": exc.record()}, ensure_ascii=False), file=sys.stderr)
     except TaskNotFound as exc:
@@ -100,6 +110,19 @@ def main(argv: list[str] | None = None) -> int:
                                    "message": "存储或记录不可用；未声明成功。"},
                           "exception_type": type(exc).__name__}, ensure_ascii=False), file=sys.stderr)
     return 2
+
+
+def model_run_report(record: dict) -> dict:
+    """Terminal-safe summary. Full request/images/raw responses remain in persisted Evidence."""
+    keys = ("label", "transport_label", "run_id", "attempt_id", "snapshot_id", "requested_model",
+            "status", "attempt_status", "dispatch_state", "provider_receipt", "model_api_call_attempted",
+            "duration_ms", "provider_usage", "provider_cost", "usage_based_cost_estimate")
+    result = {key: record[key] for key in keys if key in record}
+    if record.get("error"):
+        result["error"] = {key: record["error"][key] for key in ("code", "stage", "cause_type")
+                           if key in record["error"]}
+    result["full_evidence"] = "PERSISTED_IN_LOCAL_DATABASE; request/image/raw response omitted from terminal"
+    return result
 
 
 if __name__ == "__main__":

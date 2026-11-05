@@ -56,6 +56,7 @@ def experiment(tmp_path, monkeypatch):
         raise AssertionError("network forbidden in S03 offline tests")
     monkeypatch.setattr(socket, "create_connection", forbidden)
     monkeypatch.setenv("OPENAI_API_KEY", "offline-dummy-not-a-credential")
+    monkeypatch.setattr("aigc_workbench.config.BACKEND_ENV_FILE", tmp_path / "missing-private-config")
     monkeypatch.setattr("aigc_workbench.c01_model.PRICING_CHECKED", date.today().isoformat())
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     settings = Settings(tmp_path / "runtime", enable_c01_testing=True, enable_c01_real=True)

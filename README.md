@@ -41,7 +41,7 @@ Ctrl+C 分别停止本轮前后端。Python 修改后显式重启；不使用自
 
 ## 配置及运行数据
 
-[.env.example](.env.example) 只有示例，不含凭据。后端读取进程环境，不自动加载环境文件。
+[.env.example](.env.example) 只有示例，不含凭据。普通后端启动读取进程环境；C01 的 credential-status / preflight-real / run-real 命令在开发入口校验后，仅显式加载后端私有凭证文件，见下文。
 
 | 配置 | 默认值 / 用途 |
 |---|---|
@@ -51,7 +51,7 @@ Ctrl+C 分别停止本轮前后端。Python 修改后显式重启；不使用自
 | `AIGC_ENV` | `development`；C01 CLI 仅允许该环境 |
 | `AIGC_ENABLE_C01_TESTING` | `0`；显式为 `1` 才能使用 C01 开发 CLI |
 | `AIGC_ENABLE_C01_REAL` | `0`；真实调用的独立开关；还需 CLI 付费确认及预算 |
-| `OPENAI_API_KEY` | 无默认值；仅真实执行需要，安全注入进程环境 |
+| `OPENAI_API_KEY` | 无默认值；有效进程变量优先，否则 C01 开发命令读取 `backend/.env.local` |
 
 目录内包含 `workbench.sqlite3`、`staging/<UUID>.part`、`assets/<UUID>`。
 数据库、原始商业素材、备份、验证记录、环境文件、虚拟环境、依赖、缓存及构建产物不纳入 Git。
@@ -291,7 +291,7 @@ env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 \
 `request_sha256` 覆盖未省略的精确请求 JSON。`actual_model_input/response=null`、`model_api_call_attempted=false`。
 
 **以下仅供用户另行批准模型与一次 USD 0.02 上限后执行，本阶段没有执行。**
-先安全注入 `OPENAI_API_KEY` 到进程环境，不在命令、源码、日志或 VITE 配置中写入密钥。费用估算保护的限制见上文。
+先按下文配置后端私有 Key，不在命令、源码、日志或 VITE 配置中写入密钥。费用估算保护的限制见上文。
 保留以下 operation ID；结果未知时不得换 ID 盲目重试。
 
 ```bash
@@ -338,3 +338,35 @@ env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 \
 本阶段离线验证涵盖请求真实编码、四层不变、身份/哈希、门禁、六字段解析、异常、Evidence、幂等不重发及 V3→V4 回滚；
 HTTP 行为使用明确假响应，测试记录标 OFFLINE_TRANSPORT_TEST，不冒充真实理解或供应商 Evidence。
 原 F01/S01/S02 回归保留，仅最新 Schema 版本断言更新为 4。没有真实供应商请求、账户可用性验证、真实 Token Usage、账单或人工视觉评价。
+
+### P01-01：后端私有凭证与终端输出
+
+私有文件固定为 `backend/.env.local`，当前 `.gitignore` 的 `.env.*` 已覆盖该路径，无需重复规则。
+文件须由当前用户拥有、权限为 `0600`；拒绝符号链接、非常规文件、不安全权限、重复 Key、无效格式和过大文件。
+由用户在本地编辑器亲自填入一行 `OPENAI_API_KEY=` 的值，可有空行或整行注释，不把 Key 粘贴到聊天、命令参数或日志：
+
+```bash
+nano /Users/andy/projects/aigc-workbench/backend/.env.local
+```
+
+优先级：已有非空且格式有效的进程 `OPENAI_API_KEY` 优先，保持原值；只有不存在或为空时才从上述文件加载。
+已有进程变量格式错误则明确拒绝，不静默换 Key。文件只允许该单项凭证，不执行 shell、变量展开或任意环境配置；
+文件不能开启 real execution、改变数据目录或向 Vite 注入凭证。Settings、普通 API 启动和 S02 测试执行不自动加载此文件。
+配置状态命令不连接网络、不访问业务数据库，只输出 KEY_CONFIGURED / KEY_MISSING（配置本身不安全时输出不含凭证的明确错误）：
+
+```bash
+env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 \
+  backend/.venv/bin/python -m aigc_workbench.c01_cli credential-status
+```
+
+KEY_CONFIGURED 仅证明进程取得非空配置，不代表凭证通过供应商认证、账户有额度或指定模型可执行。
+缺失时停止，不调用模型。已有文件不覆盖、不开备份，不提交私有文件；不要使用 `source` 或 `export $(cat ...)` 来加载。
+
+run-real / inspect-model-run 的终端仅输出身份、状态、耗时、usage 及费用估算摘要；不输出请求、Base64 图片、原始响应或模型正文。
+完整材料保留在本地数据库 Evidence，后续授权的真实实验可导出至被忽略的私有 `.runtime` 文件供人工审核。
+preflight-real 仍可展示四层原文和图片来源，但省略 Base64。日志不记录 Authorization 头或 Key 任何部分。
+
+2026-11-05 核对：[官方弃用公告](https://developers.openai.com/api/docs/deprecations#2026-10-14-gpt-4-series-model-deprecations)
+将 `gpt-4.1-mini-2025-04-14` 标为 Deprecated，关闭日期为 2027-01-14，官方替代候选为 `gpt-6-luna`。
+本实验保持固定快照，不自动切换；模型元数据 GET 可访问也不等于 Responses、图片及 Structured Outputs 推理已验证。
+真实 C01 仍须用户明确确认固定模型、一次调用及预估最高 USD 0.02；估算守卫不保证供应商最终账单的绝对上限。
