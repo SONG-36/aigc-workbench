@@ -1,131 +1,129 @@
-# Quick-A 内部 Pilot：P2-A 准备记录与 P2-B 部署步骤
+# Quick-A Pilot 部署与运行
 
-状态：P2-A 工程准备；本轮不安装、不复制到服务器、不启动远程服务、不新增付费调用。
-核查日期：2026-11-05（Asia/Shanghai）。仓库基线 ec6675b3ebca9bd450856783cf6ff5bde5d85b9a。
+本轮 P2-B2 部署采用 **真实 AI 关闭、无 API Key、全新独立数据库**。不迁移开发数据库、商业素材、历史 Evidence 或测试候选，不向运营宣布正式上线。
+源代码版本与生产文件 SHA-256 以每个 release 的 `release.json` 为准，现场验收记录另存服务器 `shared/deployment-record.json`。
 
-## 已确认的运行范围
+## 当前环境与访问策略
 
-无需登录、注册、密码、角色或用户级资源权限；没有单次、每日、每用户费用或次数限制，也没有额外付费确认。
-点击“生成一张候选”或“修改这张图片”就是对应业务命令。来源完整性、有效制作决定、明确基础版本、Pass 保护仍须满足。
-费用预估与实际 Usage 继续记录；它们是观测，不是上限或账单。
-原开发 CLI 的显式实验预算协议仍限开发入口使用，不属于 Pilot 运营路径或发布门禁。
-审核人记录为未经身份验证的操作者标签，不能声称真实身份审计。
+- 目标：`andy_server@192.168.112.37`，Mac mini M4 / 16 GiB，macOS 26.4.1。
+- Python：`/opt/homebrew/opt/python@3.12/bin/python3.12`，3.12.13；Node：`/opt/homebrew/opt/node/bin/node`，26.4.0。
+- `~/projects` 是指向缺失挂载卷的悬空链接，禁止使用。
+- `~/apps/aigc-workbench-pilot` 独立于既有 8444 legacy 服务和 Docker 等其他服务。
+- 用户此前确认信任 192.168.112.0/24，但应用防火墙关闭、PF 不可读，公网转发边界尚未完整核实。
+- 本轮先绑定 **127.0.0.1:8030**；只通过 SSH 转发验收，不将 `http://192.168.112.37:8030` 声称为可用 LAN 地址，不修改系统 PF、其他代理或端口映射。
+- 上海部署保持真实 OpenAI 调用关闭。地区适用条件未解决前，不启用真实 AI，也不通过代理出口替代地区核查。
 
-用户明确确认信任整个实际局域网：192.168.112.0/24。其余网段不自动信任。
-应用同时检查 TCP 对端、Host 和同源写入；不信任 X-Forwarded-* / Forwarded，不接入公网反向代理或端口映射。
-Pilot 关闭 /docs、/redoc、/openapi.json；仅提供业务 API、生产 assets 和明确的 React 路由。
-不挂载仓库、运行目录、SQLite、完整原始 Evidence、凭证或开发者 CLI 为 HTTP 资源。
-
-## Mac mini 实际只读观察
-
-| 项目 | 当前结果 |
-|---|---|
-| SSH | andy_server@192.168.112.37 可连通 |
-| 硬件 | Apple M4，10 CPU，16 GiB 内存，arm64 |
-| macOS | 26.4.1 / 25E253 |
-| Data 卷可用空间 | 约 87 GiB |
-| 系统默认 Python | /usr/bin/python3，3.9.6，不满足项目 >=3.12 |
-| 已有 Python | /opt/homebrew/opt/python@3.12/bin/python3.12，3.12.13，可用于新 venv |
-| 已有 Node | /opt/homebrew/opt/node/bin/node，26.4.0；另有 nvm 24.18.0；非交互 SSH 默认 PATH 未包含 Node |
-| Git | 2.50.1 Apple Git |
-| 目录 | ~/apps 可写；拟用 ~/apps/aigc-workbench-pilot 当前不存在 |
-| 不可用目录 | ~/projects 为指向 /Volumes/server-data/projects 的悬空链接，挂载卷当前不存在，不使用 |
-| 子网 | en0 192.168.112.37，netmask 255.255.255.0；MacBook 192.168.112.3 与其直连 |
-| 现有服务 | legacy commerce-image-pilot 在 8444；其他服务含 3100、10000、8081/8082/8083、8000、8501、18080、18787、3306、6379 |
-| 网络基础设施 | 现有本机代理及 cloudflared 进程已存在；本轮未改动、未将新服务接入 |
-| 计划端口 | TCP 8030 核查时未监听；P2-B 启动前必须再查 |
-| 防火墙 | macOS 应用防火墙关闭；无无密码 sudo，PF 规则未能读取；不能宣称系统防火墙规则已验证 |
-| 常驻条件 | 已有用户 LaunchAgent 服务；AC sleep=0，autorestart=1。新服务计划使用独立 LaunchAgent；开机后需该用户会话存在 |
-| 私有配置 | 新 Pilot 配置及 Key 文件不存在；SSH 进程 OPENAI_API_KEY 和代理环境变量均未设置；未读取其他项目凭证 |
-| API HTTPS | 无凭证直连在 TLS 前连接被重置；既有本机代理的无凭证探测取得 HTTP 401，仅证明 HTTP 可达 |
-| 账户模型权限 | 未做认证 GET，不能证明服务器 Key 或具体模型可用；零推理调用 |
-
-用户确认实际部署地和运营使用地均为中国大陆上海。
-[OpenAI 当前支持地区](https://developers.openai.com/api/docs/supported-countries)不包含中国大陆，并说明在列表外访问或提供访问可能导致账户受限。
-因此真实 OpenAI Pilot 发布当前为 REGION_UNSUPPORTED；代理出口连通不能将该结论改为符合要求。
-本轮不更换供应商、模型或端点，也不提供绕过地区条件的部署操作。
-
-## 独立服务布局与启动
-
-以下是 P2-B 的操作说明，本轮未在 Mac mini 执行。只有地区/供应商条件已解决后，才能进入真实模型部署。
+## 目录与版本
 
 ```text
-/Users/andy_server/apps/aigc-workbench-pilot/
-  releases/<commit>/              # 本仓发布代码、业务依据和 React dist；不继承旧仓
-    backend/.venv/               # 每个 release 自己的 Python 3.12 环境
-    frontend/dist/               # React 生产构建，不运行 Vite server
+~/apps/aigc-workbench-pilot/
+  releases/<commit>/
+    release.json
+    backend/src/、backend/.venv/、backend/requirements-runtime.lock
+    frontend/dist/、frontend/package.json、frontend/package-lock.json
+    docs/                         # 能力使用的已提交依据，只读且不挂载 HTTP
+    deploy/
   current -> releases/<commit>
   shared/
-    pilot.json                   # 0600，基于 pilot.example.json
-    openai.env                   # 0600，仅 OPENAI_API_KEY=；用户在服务器上自行编辑
-    runtime/                     # 从已验证归档恢复，不能新建空库冒充迁移
-      f01/workbench.sqlite3
-      f01/assets/、image_versions/、c01/
-      creation-decision/、c01-real/、c02-real/、c06-real/、其他原始 Evidence
-    logs/                        # 0700，仅服务器维护者读取
-  backups/<UTC时间>/             # 不在 runtime 内，0700
+    pilot.json                    # 0600，无 Key，enable_real_ai=false
+    runtime/f01/
+      workbench.sqlite3
+      assets/、staging/、image_versions/、c01/snapshot_images/
+    logs/stdout.log、stderr.log    # 目录0700
+    deployment-record.json
+  backups/
+  incoming/                       # 受控安装包及匹配平台的锁定 wheels
 ```
 
-1. 再核对现有服务、8030、固定 IP、子网及上游路由。只用本项目新目录和独立 Label；不得修改原 8444 服务或其他项目。
-2. 在独立 release 目录放入指定 Git Commit 的代码；前端用该 Commit 对应依赖构建 `npm ci && npm run build`，产物置于 `frontend/dist`。Node 只用于构建。
-3. 使用现有 `/opt/homebrew/opt/python@3.12/bin/python3.12 -m venv backend/.venv`，在该 venv 安装本 release 的 backend；不改系统 Python 或其他项目 venv。以上安装仅属于后续 P2-B。
-4. 恢复已经验证的运行归档到 shared/runtime，保留 UUID、所有原始文件和历史 JSON。
-5. 复制 `pilot.example.json` 为 shared/pilot.json 并设 0600；runtime_root/data_dir/frontend_dist/key_file 指向本服务的绝对路径。archived_runtime_root 来自归档 manifest 的 source_runtime_root。
-6. 用户在服务器本地编辑 0600 的 shared/openai.env，不把 Key 发聊天、不写入命令参数、Git、前端或 plist。已有有效进程 Key 优先，私有文件兜底。不读取其他项目的 Key。
-7. 先在前台使用本 release 的 `backend/.venv/bin/python -m aigc_workbench.pilot_server --config /Users/andy_server/apps/aigc-workbench-pilot/shared/pilot.json` 验证启动。只绑定 192.168.112.37:8030；固定同源服务 React 和 FastAPI，单进程、无 reload、无代理头信任。
-8. 核实内部客户端能访问，未批准网段被拒；确认路由器没有新端口映射、现有公网代理没有新服务路由。应用网络检查是实际防线；系统防火墙/PF 状态应在 P2-B 再次核对，不能默认已隔离。
-9. 再安装本目录的独立 plist 到该用户的 ~/Library/LaunchAgents，文件路径对应 release/current；shared/logs 需预先创建。以 `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.song36.aigc-workbench-pilot.plist` 启动用户服务。无登录会话时不会宣称已具备无人值守开机启动；需要后续选择合适的系统服务方式。
-10. 查询 `launchctl print gui/$(id -u)/com.song36.aigc-workbench-pilot`、`curl http://192.168.112.37:8030/api/health` 和 shared/logs；不将日志或 Evidence 提供为运营下载接口。轮转日志时停服务、保留带时间戳旧文件，再启动；不自动删除历史。
+代码、venv 与持久数据分离；不覆盖已安装 release 或已有 current 目录。初始空库只由显式安装程序建立，正常服务启动仍要求数据库已存在。历史 UUID、图片与 Evidence 不因代码切换重写。
 
-## 执行与故障恢复
+## 构建与受控传输
 
-复用现有单线程 Dispatcher：先持久化派发收据，再领取 RUNNING、创建 Run/Attempt、保存派发意图，最后调用现有模型客户端一次。
-Operation ID 重放只查已有收据/Run，不再发请求；同身份改变来源或图位报冲突。
-重启后 QUEUED 且未进入执行的记录转失败；已派发而未可靠终结转 OUTCOME_UNKNOWN；已经保存候选的成功结果重新可读。
-未知结果保留并阻止盲目创建同图位新调用；不自动重试、切模型或重放历史修改。
-失败不产生虚假候选，新候选不覆盖原 Pass。人工 Pass/Reject 和交付仍绑定具体版本。
-正常停止最多等待正在执行的请求完成；启动器宽限 320 秒，plist ExitTimeOut 340 秒。强制停止可能留下结果未知，不能换新 Operation ID 自动再收费。
-费用观测保留原费率来源、核对日期、规划估算、供应商 Usage 与用量费用估算；不等于最终账单，费率过时也不能伪称当前精确费用。
-
-## 实际备份与恢复命令
-
-仅维护者在服务器本机执行，不提供 HTTP 调试 API。先停止本服务及其他可能写同一 runtime 的开发 CLI/进程，不影响其他项目。
-等待服务进程实际退出和锁释放；工具会拒绝仍持有执行锁的服务，再冻结 SQLite 写事务，使用 SQLite backup API，并完整复制 runtime 下的普通文件。
-不备份 API Key、.env / .key / .pem 或活动锁/SQLite 临时文件。原始业务库、素材、候选、快照图片、独立 Evidence 均在同一归档中。
+先提交本次工程变更，再在开发机执行：
 
 ```bash
-# 在本项目 current 目录执行；以下目录必须是新的，不覆盖已有归档。
-backend/.venv/bin/python -m aigc_workbench.pilot_backup create \
-  --runtime-root /Users/andy_server/apps/aigc-workbench-pilot/shared/runtime \
-  --data-dir /Users/andy_server/apps/aigc-workbench-pilot/shared/runtime/f01 \
-  --destination /Users/andy_server/apps/aigc-workbench-pilot/backups/NEW_BACKUP_NAME
-backend/.venv/bin/python -m aigc_workbench.pilot_backup verify \
-  --archive /Users/andy_server/apps/aigc-workbench-pilot/backups/NEW_BACKUP_NAME
-backend/.venv/bin/python -m aigc_workbench.pilot_backup restore \
-  --archive /Users/andy_server/apps/aigc-workbench-pilot/backups/NEW_BACKUP_NAME \
-  --destination /Users/andy_server/apps/aigc-workbench-pilot/shared/NEW_RESTORED_RUNTIME
+backend/.venv/bin/python deploy/build_release.py --output .runtime/p2-b2-release.tar.gz
+backend/.venv/bin/python -m pip download --index-url https://pypi.org/simple --only-binary=:all: --no-deps \
+  -r backend/requirements-runtime.lock --dest .runtime/p2-b2-wheels
 ```
 
-工具检查完整文件清单及 SHA-256、SQLite integrity/FK、各表行内容哈希、素材、快照、Run/Evidence、候选业务归属、审核和有效交付。
-恢复只允许新目录，不覆盖现有运行库。先在隔离目录验证，再停服务并明确切换服务器配置指向恢复目录。
-历史 Snapshot 的绝对路径通过服务器 runtime_root + archived_runtime_root 映射，原文和哈希不重写。
-归档需另存至不同故障域，并定期实测恢复；本轮单机恢复测试不能证明异机备份或断电耐久已完成。
+构建器从 Git HEAD 导出白名单源代码，在不含本地 `.env` 的临时导出目录构建 React；仅打包必要 backend、部署工具、业务依据、生产 dist 与依赖锁。
+不传输 node_modules、本地 venv、任何 .env、.runtime、商业素材、浏览器截图或测试适配器。wheels 只包含当前锁定依赖；必须匹配服务器 Python 3.12 / arm64。
+使用 SSH/SCP 将该包、安装脚本与 wheels 放入本服务新建的 incoming 目录，核对本地/远程 SHA-256。
+
+服务器使用显式 Python 路径：
+
+```bash
+/opt/homebrew/opt/python@3.12/bin/python3.12 incoming/install_release.py \
+  --root /Users/andy_server/apps/aigc-workbench-pilot \
+  --bundle incoming/RELEASE.tar.gz --commit COMMIT_SHA \
+  --wheels incoming/wheels
+```
+
+安装程序校验成员路径、完整文件清单和 SHA-256，创建 release 专属 venv，离线安装锁定 wheels 并运行 pip check。
+release-local `.pth` 指向该 release 的 backend/src，使原有 REPOSITORY_ROOT 与业务依据路径保持有效；不安装未锁定构建工具、不复用其他项目 venv。
+安装程序不切换 current、不自动启动服务、不复制 Key。更新时保留已有私有配置，拒绝本次流程启用真实 AI。
+
+## 启动、停止及状态
+
+首次以明确的 release Python 激活版本并安装本服务 LaunchAgent：
+
+```bash
+releases/COMMIT_SHA/backend/.venv/bin/python releases/COMMIT_SHA/deploy/pilotctl.py activate COMMIT_SHA
+current/backend/.venv/bin/python current/deploy/pilotctl.py install-agent
+current/backend/.venv/bin/python current/deploy/pilotctl.py start
+current/backend/.venv/bin/python current/deploy/pilotctl.py status
+current/backend/.venv/bin/python current/deploy/pilotctl.py restart
+current/backend/.venv/bin/python current/deploy/pilotctl.py stop
+```
+
+所有命令从本服务根目录执行。Label 固定为 `com.song36.aigc-workbench-pilot`，仅控制当前用户的该服务，不使用 sudo，不改其他 Label。
+LaunchAgent 通过 `gui/$(id -u)` 启动。必须有该用户 GUI 会话；KeepAlive 与当前会话内恢复需现场验证，不能据此声称退出登录、断电开机后全天运行。
+停止会等待本服务执行锁释放；若仍在停止，不直接再启动或重试执行。日志位于 shared/logs，日志轮转前先停本服务并保留旧日志。
+
+从开发机建立只绑定本机的 SSH 转发：
+
+```bash
+ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:18030:127.0.0.1:8030 andy_server@192.168.112.37
+```
+
+实际健康检查和浏览器验收成功后，可使用 `http://127.0.0.1:18030`；关闭 SSH 隧道会关闭该访问入口，不影响服务器 LaunchAgent。
+将来直接开放 LAN 必须另行核实系统及上游边界、已有公网代理、实际客户端网段，并明确更改 bind_host/hosts/networks；本轮不执行。
+
+## 真实 AI 关闭与 HTTP 边界
+
+`enable_real_ai` 默认 false：启动器强制关闭 C01/C06/C07 真实执行开关，Workspace 生成及修改从后端拒绝，且不加载任何凭据。
+UI 明示“模型服务暂不可用”。即使继承了进程 Key 或旧开关，禁用配置仍不能触发推理；不注入测试适配器，不制造成功候选。
+保留 C01～C07 源代码、Operation ID、零隐式重试、OUTCOME_UNKNOWN、Run/Evidence、版本及 Pass 规则，后续供应商条件适用后再单独启用。
+
+无需登录、账号角色、每日额度或额外费用审批弹窗；这不取消文件归属、SHA-256、Host、TCP 对端和同源写入校验。
+拒绝 Forwarded / X-Forwarded-*；关闭 /docs、/redoc、/openapi.json，不挂载运行目录、源代码、私有配置、SQLite 或原始 Evidence。
+
+## 备份与隔离恢复
+
+先停止本服务；工具不自动终止其他进程，也拒绝仍持有执行锁的 runtime：
+
+```bash
+current/backend/.venv/bin/python current/deploy/pilotctl.py stop
+current/backend/.venv/bin/python current/deploy/pilotctl.py backup NEW_UTC_BACKUP_NAME
+current/backend/.venv/bin/python -m aigc_workbench.pilot_backup verify --archive backups/NEW_UTC_BACKUP_NAME
+current/backend/.venv/bin/python -m aigc_workbench.pilot_backup restore \
+  --archive backups/NEW_UTC_BACKUP_NAME --destination shared/NEW_ISOLATED_RESTORED_RUNTIME
+current/backend/.venv/bin/python current/deploy/pilotctl.py start
+```
+
+既有工具冻结 SQLite 写事务并调用 SQLite backup API，覆盖 runtime 中全部业务、原图、Image Versions、Review/Pass、Snapshot、Run/Attempt/Evidence。
+配置与 release 身份另保存为归档根目录的 pilot-config.json、release-version.json，其 SHA-256 在 deployment-files.json 中；不备份任何 Key 或环境密钥文件。
+隔离恢复只允许新目录，不覆盖运行库。验证表内容、Task ID、Asset/Slot、图片 SHA-256、版本、Review 和 Evidence 后，再决定是否切换。
+必要配置恢复时先校验 deployment-files.json，并复制到新的私有配置文件；若启用隔离恢复目录，明确修改 runtime_root/data_dir/archived_runtime_root，不能悄悄覆盖正在使用的配置。
+全新部署没有历史真实候选、Review 或 AI Evidence 时应如实记录零条；不能用测试结果伪造恢复验证。备份应另存不同故障域，本轮服务器同机隔离恢复不等于异地容灾验证。
 
 ## 更新与回滚
 
-更新前：只停本服务，确认无未终结操作（未知状态保留），创建并 verify 一份完整归档。
-将新 Commit 放入全新 release 并完成测试/生产构建/独立 venv，保留旧 release 和运行归档。
-停服务后以同目录临时链接再原子替换 current；不得覆盖正在运行的 release。新服务启动检查与只读浏览通过后才给运营使用。
-本轮没有新增数据库 Schema，因此本次代码回退可指回上一 release 并保留 runtime；原开发服务的 localhost 访问限制不应被当作 Pilot LAN 可用性。
-未来若版本有不可逆 schema 变化，须先恢复匹配的完整归档到新目录再回退代码，不能只改 current。
-恢复旧归档会丢失备份之后的进展：先保留当前完整 runtime，不自动回滚或丢弃新增候选、审核与未知请求。
-无论更新、恢复或回滚，启动都不能自动执行新的付费请求。
+1. 停止本服务，创建并 verify 当前完整备份，保留全部未终结及未知操作。
+2. 上传新 Commit 的白名单生产包，安装到新的 releases/<commit>，不覆盖旧 release 或 shared。
+3. 使用当前 Python 调用 pilotctl.py activate 新 SHA，原子替换 current；启动并检查 HTTP、资料及错误日志。
+4. 若需回滚，先停止并备份现状，再 activate 已安装的旧 SHA 并启动；不自动覆盖、删除或回退业务数据。
+5. 数据库 schema 不兼容时，必须将对应归档恢复到新目录并明确配置切换，不能只换代码，也不能丢弃备份之后的新增资料。
 
-## 当前功能边界与发布判定
-
-登录、角色、用户费用额度、次数限制及费用弹窗均不属于 Go/No-Go。
-已有真实主图 V1/V2 可查看、按选定版本修改、人工审核和下载 Pass。
-但新建 Task/上传/绑定本身尚不会从 Workspace 自动执行 C01～C05 并形成制作决定；没有有效决定的图位仍禁止伪造输入生图。
-因此不能把当前服务描述为任意新商品完整自助闭环。本轮没有扩建该链路；P2-B 必须明确先限定已有合格图位，或另行接通新商品制作决定。
-现有 V1/V2 的商品结构和精确色值仍待人工审核，Git 归档或工程通过不等于图片质量 Pass。
-剩余真实发布前提为：解决上海使用与供应商支持范围不符；提供本服务私有凭证并核验账户模型访问；确认内部网络/防火墙/无公网路由；完成异机安装、数据恢复和浏览器验证。
+初次部署尚无历史 release，真实版本降级无法直接演练；原子切换及共享数据保留由自动化测试覆盖。所有启动、更新、恢复和回滚都不能自动发起新的付费请求。

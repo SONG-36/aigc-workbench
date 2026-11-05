@@ -88,6 +88,7 @@ class Settings:
     frontend_dist: Path | None = None
     runtime_root: Path | None = None
     archived_runtime_root: Path | None = None
+    model_service_disabled_reason: str | None = None
 
     @property
     def database_path(self) -> Path:

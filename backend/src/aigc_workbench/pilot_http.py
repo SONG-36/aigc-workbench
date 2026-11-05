@@ -23,7 +23,7 @@ def pilot_boundary(settings):
         raise ValueError('Pilot runtime root must contain the data directory.')
     if (settings.runtime_root.is_symlink() or settings.data_dir.is_symlink() or settings.database_path.is_symlink()
             or not settings.database_path.is_file() or not settings.data_dir.resolve().is_relative_to(settings.runtime_root.resolve())):
-        raise ValueError('Pilot needs an existing restored database in its private runtime; never create an empty substitute.')
+        raise ValueError('Pilot needs an explicitly initialized or restored database in its private runtime.')
     if dist.resolve().is_relative_to(settings.runtime_root.resolve()) or settings.runtime_root.resolve().is_relative_to(dist.resolve()):
         raise ValueError('Public frontend files and private runtime data must be separate.')
     return networks

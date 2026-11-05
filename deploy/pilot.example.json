@@ -1,11 +1,11 @@
 {
-  "bind_host": "192.168.112.37",
+  "bind_host": "127.0.0.1",
   "port": 8030,
-  "hosts": ["192.168.112.37", "127.0.0.1", "localhost"],
-  "networks": ["192.168.112.0/24", "127.0.0.0/8", "::1/128"],
+  "hosts": ["127.0.0.1", "localhost"],
+  "networks": ["127.0.0.1/32", "::1/128"],
+  "enable_real_ai": false,
   "runtime_root": "/Users/andy_server/apps/aigc-workbench-pilot/shared/runtime",
   "data_dir": "/Users/andy_server/apps/aigc-workbench-pilot/shared/runtime/f01",
-  "archived_runtime_root": "/Users/andy/projects/aigc-workbench/.runtime",
-  "frontend_dist": "/Users/andy_server/apps/aigc-workbench-pilot/current/frontend/dist",
-  "key_file": "/Users/andy_server/apps/aigc-workbench-pilot/shared/openai.env"
+  "archived_runtime_root": null,
+  "frontend_dist": "/Users/andy_server/apps/aigc-workbench-pilot/current/frontend/dist"
 }

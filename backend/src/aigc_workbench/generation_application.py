@@ -213,7 +213,7 @@ class GenerationApplication:
             candidate["operator_approved"] = candidate["pass"]
             candidate["is_current_delivery"] = bool(delivery and delivery["image_version_id"] == candidate["image_version_id"])
         executions = self._history(task_id, slot_id, candidates)
-        readiness = {"can_generate": False, "reason": "本地服务尚未启用付费生成。", "quote_token": None,
+        readiness = {"can_generate": False, "reason": self.settings.model_service_disabled_reason or "本地服务尚未启用付费生成。", "quote_token": None,
                      "model": MODEL, "parameters": PARAMETERS, "max_cost_usd": None if self.settings.environment == "pilot" else "1.00", "estimate_usd": None,
                      "decision_snapshot_id": None, "product_asset_id": None,
                      "reference_asset_id": str(slot.reference_asset_id) if slot.reference_asset_id else None}
@@ -268,7 +268,7 @@ class GenerationApplication:
             if db.execute("SELECT id FROM c01_model_runs WHERE operation_id=?", (str(operation_id),)).fetchone():
                 raise Conflict("操作身份已用于历史模型执行，不能重新提交为新生图。")
         if not self.enabled or self.access_error:
-            raise C01Error("WORKSPACE_GENERATION_DISABLED", "ACCESS", self.access_error or "本地服务未启用付费生成。")
+            raise C01Error("WORKSPACE_GENERATION_DISABLED", "ACCESS", self.access_error or self.settings.model_service_disabled_reason or "本地服务未启用付费生成。")
         workspace = self.workspace(task_id, slot_id)
         ready = workspace["readiness"]
         if not ready["can_generate"]:
