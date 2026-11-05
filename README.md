@@ -6,7 +6,8 @@ React 工作台 + FastAPI 模块化单体 + SQLite / 本地原始素材文件。
 - **S01-A ENGINEERING VERIFIED**：Task 演进、V1→V2、Asset/Slot、幂等写入与 R01～R04。
 - **S01-B ENGINEERING VERIFIED**：范围限于本轮实际接通并在桌面浏览器验证的素材上传、图位参考绑定、保存/刷新/重新打开/进程重启恢复。
 - 这不是 BUSINESS ACCEPTED；完整旧 UI、带数据候选、历史版本、修改、Pass / Reject、Inspector 仍未完整视觉验收。
-- 不支持 AI 理解、生图、图片修改、审核或完整三模式；没有开始 S02。
+- **S02 ENGINEERING VERIFIED**：受控 CLI 完成 C01 输入准备、四层 Prompt、快照及测试证据；没有真实 AI 理解或 S03。
+- 不支持真实 AI、生图、图片修改、审核或完整三模式。
 - [业务/架构依据](docs/business/)和[实施文档](docs/implementation/)未在本轮重写。
 
 ## 安装与启动
@@ -46,6 +47,8 @@ Ctrl+C 分别停止本轮前后端。Python 修改后显式重启；不使用自
 | `AIGC_DATA_DIR` | `.runtime/f01`，相对仓库根目录解析；沿用 F01 数据目录 |
 | `AIGC_ALLOWED_ORIGINS` | 本机 8021 的 Origin，逗号分隔 |
 | `AIGC_API_TARGET` | `http://127.0.0.1:8022`，Vite 服务端代理 |
+| `AIGC_ENV` | `development`；C01 CLI 仅允许该环境 |
+| `AIGC_ENABLE_C01_TESTING` | `0`；显式为 `1` 才能使用 C01 开发 CLI |
 
 目录内包含 `workbench.sqlite3`、`staging/<UUID>.part`、`assets/<UUID>`。
 数据库、原始商业素材、备份、验证记录、环境文件、虚拟环境、依赖、缓存及构建产物不纳入 Git。
@@ -96,7 +99,7 @@ Task 创建的未确认意图保存在 sessionStorage，刷新后只恢复意图
 
 ## SQLite 升级及文件一致性
 
-启动时显式初始化/迁移：空库建立初始结构，再升级到 V2；V1 仅新增 task_creations、assets、image_slots 及约束，不重建原任务表。
+启动时显式初始化/迁移：F01/S01 的 V1→V2 新增 task_creations、assets、image_slots；S02 最新版本 V3 追加 C01 快照与执行证据表，不重建或改写原任务表。
 迁移在单一事务中进行，成功才升级 user_version；未知版本拒绝，异常回滚。每次运行期连接启用外键，且使用 `mode=rw`，缺库读取不会隐式建库。
 后续 Schema 变更继续采用顺序迁移、备份和旧数据保留测试；禁止删除数据库代替迁移。
 
@@ -156,3 +159,85 @@ Microsoft Edge 实际上传了商品 JPEG 和营销参考 PNG，保存到原 F01
 旧 UI 来源为 I01 §8 的 commerce-image-poc。只读查看现有 8013 新建页，切换 Quick-A，核对浅色 INPUT、固定三列图位、动态组及未保存参考缩略图/移除交互，没有保存旧任务或触发 AI。
 新仓保留这些区域关系；增加明确的服务端素材区与图位选择，按本次“先保存素材、再独立绑定”的要求区分资产和图位身份；不继承旧全局脚本、另存 Task 方式或 Planning 门禁。
 候选/历史/修改/Pass/Inspector 的完整旧带数据视觉基线仍待补齐；完整响应式及辅助技术验收尚未完成。
+
+## S02：C01 输入准备与测试证据（开发 CLI）
+
+**S02 ENGINEERING VERIFIED**，限于真实业务来源 → 有效状态 → Context → 四层 Prompt → 不可变 Snapshot → TEST_ONLY Run / Attempt / Evidence。
+**C01 AI EVALUATED：未完成；BUSINESS ACCEPTED：未建立。** 没有真实模型、SDK 请求序列化、生成或 S03 开发。
+
+采用本地 CLI，不新增开发 HTTP API、工作台页面或完整 Inspector。
+入口在任何存储访问前检查 `AIGC_ENV=development` 且 `AIGC_ENABLE_C01_TESTING=1`；默认关闭。生产环境即使开关为 1 也拒绝。
+`.env.example` 不自动加载，以下环境值仅作用于该命令。没有模型凭据或真实模型开关。
+
+将下列 TASK_UUID / PRODUCT_ASSET_UUID / SNAPSHOT_UUID / OPERATION_UUID / RUN_UUID 替换为实际 UUID：
+```bash
+env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 backend/.venv/bin/python -m aigc_workbench.c01_cli prepare --task-id TASK_UUID --asset-id PRODUCT_ASSET_UUID
+
+env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 backend/.venv/bin/python -m aigc_workbench.c01_cli inspect-snapshot --snapshot-id SNAPSHOT_UUID --format readable
+
+env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 backend/.venv/bin/python -m aigc_workbench.c01_cli run --snapshot-id SNAPSHOT_UUID --operation-id OPERATION_UUID
+
+env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 backend/.venv/bin/python -m aigc_workbench.c01_cli inspect-run --run-id RUN_UUID
+
+env AIGC_ENV=development AIGC_ENABLE_C01_TESTING=1 backend/.venv/bin/python -m aigc_workbench.c01_cli history --task-id TASK_UUID
+```
+
+prepare 返回完整 JSON 和 Snapshot ID。inspect-snapshot 默认 JSON，readable 展示逐层文字、最终计划输入及单独图片关联。
+run 只执行 `TEST_ONLY / MOCK_ADAPTER`；`--adapter-mode fail` 是显式失败演示，不是模型失败。
+同 operation UUID 重放只返回原 Run/Attempt；不同快照或测试模式冲突，不自动重跑。
+成功退出码 0，已记录的失败 Run 退出码 1，入口/准备/存储/查询错误退出码 2；错误不会输出伪成功记录。
+
+### 实际代码位置
+
+| 文件 | 实际职责 |
+|---|---|
+| [c01_cli.py](backend/src/aigc_workbench/c01_cli.py) | 开发开关、命令、非零错误退出 |
+| [c01_context.py](backend/src/aigc_workbench/c01_context.py) | select_source / resolve_effective_state / assemble_context |
+| [c01_prompt.py](backend/src/aigc_workbench/c01_prompt.py) | compose_prompt / validate_composition / readable_request；模板 c01-four-layer-v1 |
+| [c01_execution.py](backend/src/aigc_workbench/c01_execution.py) | C01Service.prepare / run_test；实际 C01TestAdapter |
+| [c01_persistence.py](backend/src/aigc_workbench/c01_persistence.py) | 快照图片、只追加记录、Run/Attempt/Evidence 一致性 |
+
+### 来源、Context 与 Prompt
+
+- 显式选择当前 Quick-A Task 中的 product_image；校验归属、角色、文件存在、字节长度及 SHA-256，不默认选营销参考。
+- Effective State 固定 C01 视觉观察范围。Task.mode 仅作业务模式声明；不是性能认证。
+- 当前 S01 没有商品身份/配置确认记录，`operator_confirmed_information=[]`；不把图位制作要求或 Task 名称变成确认事实。
+- Context 分开保存 business_source、operator_confirmed_information、applicable_rules、capability_specific_inputs。
+- 规则映射记录业务文档/研究章节、状态及文件哈希。代码中固定的技术约束仍是实现候选，不把研究建议升级为业务批准。
+- 业务来源中的 Task 名称、文件名仅用于追溯，不进入计划模型文字；参考图内容、其他商品图、Slot 要求和历史 AI 结果不进入本次 C01。
+- Prompt 四层：Capability Instruction、Rules / Boundaries、Effective Context、Output Contract。四层可独立检查，但只形成一个计划请求。
+- 输出契约为六个 string 数组：visible_structure、components、visible_text、spatial_relations、inferences、uncertainties。前四项只记录直接观察，推断与不确定性分开。
+- 模板版本、各层内容/来源/哈希、动态 Context 哈希、最终文字与图片 Asset ID/SHA 均固定在 Snapshot。
+- 来源变化后新 prepare 重新读取和解析；旧快照不改写。不实现自动失效、语义规则同步或缓存平台；规则来源变化时需维护代码中的规则映射。
+
+### 不可变输入及执行记录
+
+V2→V3 只新增 c01_snapshots、c01_runs、c01_attempts、c01_evidence 和保护约束，不更新业务行。
+Snapshot JSON 与 Evidence 仅追加，数据库触发器禁止 UPDATE/DELETE，终态 Run/Attempt 不再改写；读取核对内容哈希及关联。
+图片以 `c01/snapshot_images/<Snapshot UUID>` 固定原始字节副本，非新增业务 Asset；只写一次，设为只读，拒绝符号链接并核对 SHA-256。
+复制后提交失败留下的 UUID 副本可由 history 的 orphan_snapshot_images 识别，不自动删除。
+
+`PLANNED MODEL INPUT` 是未来 S03 的模型无关请求定义：文字与图片分别表达，provider/model 未配置，供应商序列化未实现。
+测试适配器实际收到文字和图片 bytes，并独立计算输入收据；不是只收到文件路径字符串。
+`ACTUAL TEST ADAPTER INPUT` 只证明本轮测试交接，不是 Actual Model Input；后者保持 null，model_api_call_attempted=false。
+Test Adapter 不做图像识别，visual_understanding=null，不生成 AI_DERIVED 商品事实，不改变 Task/Slot/Pass。
+
+每个 S02 Run 只有一个真实测试 Attempt，成功/失败及原始测试响应可查询。没有队列、自动重试或多 Attempt 恢复平台。
+成功终态与 Evidence 在同一事务保存。若 Evidence 保存失败，尽可能记录 FAILED / MISSING，保留已知测试收据；连失败记录也无法保存则返回结果未确认。
+遗留 RUNNING/PENDING 表示没有可靠终态，不保证进程仍活跃；检查现有记录，不把它当成功，不自动重跑。
+
+### 验证与实际示例
+
+本轮后端 86 项（含原 F01/S01 回归）、前端 18 项、TypeScript、构建和依赖检查通过。
+新增测试覆盖身份/角色/跨 Task、缺失或损坏图片、来源选择期间变化、Context/Prompt 故障、四层一致性、
+快照/证据不可变与篡改检测、适配器失败、证据保存/查询失败、状态矛盾、开发入口限制及迁移回滚。
+文件/SQLite 使用真实临时资源；存储/适配器异常明确采用故障注入；一个测试禁止网络连接以验证测试路径无需网络。
+原回归测试仅将最新 Schema 版本断言同步为 3，其业务保存、恢复、错误和禁用 AI 断言保留。
+
+实际以 S01 已保存的商品 JPEG 完成 prepare、成功测试、显式失败测试、同操作重放、独立进程查询和 history。
+本机实例在忽略的 `.runtime/s02-example/`：snapshot.json、planned-request.txt、successful-test-run.json、failed-test-run.json、history.json、verification.json。
+迁移前备份在 `.runtime/s02-backups/`；V2→V3 后业务表逐行不变，固定图片与原图字节相等。
+这些本地输出不是已提交的通用样本或业务批准文档。
+
+S03 仍需单独授权模型、预算及真实调用，验证图片序列化、模型输出契约、视觉理解质量、遵循边界和人工评价；
+S02 不能证明模型会关注图片、遵守 Prompt 或产生正确商品理解。

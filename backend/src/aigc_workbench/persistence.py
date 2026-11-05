@@ -52,6 +52,43 @@ V2_TABLES = [
        WHERE kind IN ('main', 'comparison')""",
 ]
 
+# S02 execution records share the DB but never update Task/Asset/Slot business rows.
+V3_TABLES = [
+    """CREATE TABLE c01_snapshots (
+        id TEXT PRIMARY KEY NOT NULL, task_id TEXT NOT NULL REFERENCES task_drafts(id),
+        asset_id TEXT NOT NULL, created_at TEXT NOT NULL,
+        body_json TEXT NOT NULL, body_sha256 TEXT NOT NULL,
+        FOREIGN KEY(asset_id,task_id) REFERENCES assets(id,task_id)
+    )""",
+    """CREATE TABLE c01_runs (
+        id TEXT PRIMARY KEY NOT NULL, snapshot_id TEXT NOT NULL REFERENCES c01_snapshots(id),
+        operation_id TEXT NOT NULL UNIQUE, adapter_mode TEXT NOT NULL CHECK(adapter_mode IN ('success','fail')),
+        status TEXT NOT NULL CHECK(status IN ('RUNNING','SUCCEEDED','FAILED')),
+        evidence_status TEXT NOT NULL CHECK(evidence_status IN ('PENDING','AVAILABLE','MISSING')),
+        created_at TEXT NOT NULL, finished_at TEXT, error_json TEXT
+    )""",
+    """CREATE TABLE c01_attempts (
+        id TEXT PRIMARY KEY NOT NULL, run_id TEXT NOT NULL UNIQUE REFERENCES c01_runs(id),
+        status TEXT NOT NULL CHECK(status IN ('RUNNING','SUCCEEDED','FAILED')),
+        started_at TEXT NOT NULL, finished_at TEXT,
+        actual_test_input_json TEXT, raw_result_json TEXT, error_json TEXT
+    )""",
+    """CREATE TABLE c01_evidence (
+        run_id TEXT PRIMARY KEY NOT NULL REFERENCES c01_runs(id),
+        body_json TEXT NOT NULL, body_sha256 TEXT NOT NULL
+    )""",
+]
+for _table in ("c01_snapshots", "c01_evidence"):
+    for _action in ("UPDATE", "DELETE"):
+        V3_TABLES.append(f"""CREATE TRIGGER {_table}_immutable_{_action.lower()}
+            BEFORE {_action} ON {_table} BEGIN SELECT RAISE(ABORT, 'immutable S02 evidence'); END""")
+for _table in ("c01_runs", "c01_attempts"):
+    V3_TABLES.append(f"""CREATE TRIGGER {_table}_terminal
+        BEFORE UPDATE ON {_table} WHEN OLD.status != 'RUNNING'
+        BEGIN SELECT RAISE(ABORT, 'terminal S02 record'); END""")
+    V3_TABLES.append(f"""CREATE TRIGGER {_table}_retain
+        BEFORE DELETE ON {_table} BEGIN SELECT RAISE(ABORT, 'retain S02 history'); END""")
+
 
 def asset_from_row(row: sqlite3.Row) -> Asset:
     return Asset(UUID(row["id"]), UUID(row["task_id"]), AssetRole(row["role"]), row["filename"],
@@ -89,14 +126,18 @@ class SQLiteTaskStore:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("BEGIN IMMEDIATE")
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, 1, 2}:
+            if version not in {0, 1, 2, 3}:
                 raise RuntimeError(f"Unsupported database schema version: {version}")
             if version == 0:
                 connection.execute(V1_TASKS)
                 version = 1
             if version == 1:
                 self._upgrade_v1(connection)
-                connection.execute("PRAGMA user_version = 2")
+                version = 2
+            if version == 2:
+                for statement in V3_TABLES:
+                    connection.execute(statement)
+                connection.execute("PRAGMA user_version = 3")
             if connection.execute("PRAGMA foreign_key_check").fetchone():
                 raise RuntimeError("Database foreign-key validation failed")
 
@@ -115,9 +156,15 @@ class SQLiteTaskStore:
         return connection
 
     @contextmanager
-    def write(self):
+    def connection(self, *, write: bool = False):
+        """Infrastructure-only connection boundary shared by business and S02 stores."""
         with closing(self._connect()) as connection, connection:
-            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+            yield connection
+
+    @contextmanager
+    def write(self):
+        with self.connection(write=True) as connection:
             yield SQLiteChanges(connection)
 
     def get(self, task_id: UUID) -> Task | None:

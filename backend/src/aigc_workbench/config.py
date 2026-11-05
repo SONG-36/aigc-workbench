@@ -13,6 +13,8 @@ class Settings:
     allowed_origins: tuple[str, ...] = (
         "http://127.0.0.1:8021", "http://localhost:8021",
     )
+    environment: str = "development"
+    enable_c01_testing: bool = False
 
     @property
     def database_path(self) -> Path:
@@ -28,4 +30,5 @@ class Settings:
                 "AIGC_ALLOWED_ORIGINS", "http://127.0.0.1:8021,http://localhost:8021"
             ).split(",")
         )))
-        return cls(path.resolve(), origins)
+        return cls(path.resolve(), origins, os.environ.get("AIGC_ENV", "development"),
+                   os.environ.get("AIGC_ENABLE_C01_TESTING", "0") == "1")
