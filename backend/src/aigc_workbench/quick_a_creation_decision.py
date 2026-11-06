@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from .c01_context import C01Error, canonical, fingerprint, now
-from .c01_model import ENDPOINT, credential_status, estimate_cost, multimodal_request, response_object
+from .c01_model import vision_endpoint, credential_status, estimate_cost, multimodal_request, response_object
 from .c01_model_store import C01ModelStore
 from .c01_prompt import LAYER_NAMES, final_text
 from .c02_reference import C02RealService, STRING, STRINGS, object_schema, records
@@ -226,8 +226,8 @@ class QuickACreationDecisionService(C02RealService):
             max_output_tokens, additional_images=((reference, selection["reference_asset"]["media_type"]),),
             output_ceiling=8192)
         return {"label": "C03_C04_C05 PLANNED MODEL INPUT / NO REQUEST SENT", "snapshot": snapshot,
-                "request": request, "request_sha256": fingerprint(request), "endpoint": ENDPOINT,
-                "cost": estimate_cost(snapshot, request), "credentials": credential_status(),
+                "request": request, "request_sha256": fingerprint(request), "endpoint": vision_endpoint(model),
+                "cost": estimate_cost(snapshot, request), "credentials": credential_status(model),
                 "actual_model_input": None, "actual_model_response": None, "model_api_call_attempted": False,
                 "network_requests": 0}
 

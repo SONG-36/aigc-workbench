@@ -87,7 +87,7 @@ class CandidateStore:
             raise C01Error("CANDIDATE_IMAGE_CORRUPT", "CANDIDATE_QUERY", "候选PNG完整性失败。")
         return body
 
-    def save(self, run: dict, snapshot: dict, png: bytes, *, test_only=False) -> dict:
+    def save(self, run: dict, snapshot: dict, png: bytes, *, test_only=False, native_png: bytes | None = None) -> dict:
         offline = (test_only and run['transport_label'] == 'OFFLINE_TRANSPORT_TEST'
                    and run['model_api_call_attempted'] is False and run.get('offline_test_response') is not None)
         if run["status"] != "SUCCEEDED" or not (run["transport_label"] == "REAL_PROVIDER_TRANSPORT" or offline):
@@ -120,7 +120,7 @@ class CandidateStore:
             body.update(plan, native_image=run["structured_output"]["content"]["native_image"])
             if plan["postprocess"] != "NONE":
                 response = run['offline_test_response'] if offline else run['actual_model_response']
-                native = base64.b64decode(response["data"][0]["b64_json"], validate=True)
+                native = native_png if native_png is not None else base64.b64decode(response["data"][0]["b64_json"], validate=True)
                 if asdict(inspect_image(native, "image/png")) != body["native_image"]:
                     raise C01Error("CANDIDATE_IMAGE_CORRUPT", "CANDIDATE_SAVE", "模型原生PNG与执行证据不一致。")
                 body["native_file"] = str((self.directory / (version_id.hex + ".native.png")).resolve())

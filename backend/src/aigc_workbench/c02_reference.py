@@ -5,7 +5,7 @@ from hashlib import sha256
 from uuid import UUID, uuid4
 
 from .c01_context import C01Error, canonical, fingerprint, now
-from .c01_model import (ENDPOINT, credential_status, estimate_cost, multimodal_request, response_object)
+from .c01_model import (vision_endpoint, credential_status, estimate_cost, multimodal_request, response_object)
 from .c01_prompt import LAYER_NAMES, final_text
 from .c01_real import C01RealService
 from .domain import AssetRole
@@ -158,8 +158,8 @@ class C02RealService(C01RealService):
                                      selection["reference_asset"]["media_type"], snapshot["prompt"]["output_schema"],
                                      "c02_reference_observation", model, max_output_tokens)
         return {"label": "C02 PLANNED MODEL INPUT / NO REQUEST SENT", "snapshot": snapshot, "request": request,
-                "request_sha256": fingerprint(request), "endpoint": ENDPOINT,
-                "cost": estimate_cost(snapshot, request), "credentials": credential_status(),
+                "request_sha256": fingerprint(request), "endpoint": vision_endpoint(model),
+                "cost": estimate_cost(snapshot, request), "credentials": credential_status(model),
                 "actual_model_input": None, "actual_model_response": None,
                 "model_api_call_attempted": False, "network_requests": 0}
 

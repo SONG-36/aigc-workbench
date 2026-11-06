@@ -1,4 +1,4 @@
-"""Process settings and explicit backend-only credential loading for the C01 developer CLI."""
+"""Process settings and explicit backend-only private provider credentials."""
 
 from dataclasses import dataclass
 import os
@@ -18,16 +18,22 @@ def _valid_key(value: str) -> bool:
 
 
 def load_openai_credentials() -> str:
-    """Existing nonblank process key wins; otherwise load only OPENAI_API_KEY from a private file.
+    return load_provider_credentials("OPENAI_API_KEY")
+
+
+def load_provider_credentials(name: str = "DASHSCOPE_API_KEY") -> str:
+    """Existing nonblank process key wins; otherwise load the selected key from a private file.
 
     No shell evaluation, interpolation, arbitrary env loading, logging, or frontend injection.
     Called by the gated developer CLI or explicitly enabled development Workspace execution.
     Settings/imports and the default (generation-disabled) app never load credentials.
     """
-    existing = os.environ.get("OPENAI_API_KEY", "").strip()
+    if name not in {"OPENAI_API_KEY", "DASHSCOPE_API_KEY"}:
+        raise CredentialConfigError("不支持的凭证名称。")
+    existing = os.environ.get(name, "").strip()
     if existing:
         if not _valid_key(existing):
-            raise CredentialConfigError("OPENAI_API_KEY 进程配置格式无效；未用文件覆盖。")
+            raise CredentialConfigError("供应商进程凭证格式无效；未用文件覆盖。")
         return "KEY_CONFIGURED"
     path = Path(os.environ.get("AIGC_PRIVATE_KEY_FILE", str(BACKEND_ENV_FILE))).expanduser()
     try:
@@ -48,28 +54,29 @@ def load_openai_credentials() -> str:
         lines = content.decode("utf-8").splitlines()
     except (OSError, UnicodeError):
         raise CredentialConfigError("无法读取 backend/.env.local 配置；未加载凭证。") from None
-    values = []
+    values = {}
     for line in lines:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        name, separator, value = line.partition("=")
-        if separator != "=" or name.strip() != "OPENAI_API_KEY":
-            raise CredentialConfigError("backend/.env.local 仅支持 OPENAI_API_KEY= 单行配置及注释。")
+        variable, separator, value = line.partition("=")
+        variable = variable.strip()
+        if separator != "=" or variable not in {"OPENAI_API_KEY", "DASHSCOPE_API_KEY"}:
+            raise CredentialConfigError("backend/.env.local 仅支持两个供应商的 API_KEY 单行配置及注释。")
         value = value.strip()
         if value.startswith(("'", '"')):
             if len(value) < 2 or value[-1] != value[0]:
                 raise CredentialConfigError("backend/.env.local 配置引号不匹配。")
             value = value[1:-1]
-        values.append(value)
-    if len(values) > 1:
-        raise CredentialConfigError("backend/.env.local 存在重复 OPENAI_API_KEY；未加载凭证。")
-    if not values or not values[0]:
+        if variable in values:
+            raise CredentialConfigError("backend/.env.local 存在重复凭证；未加载凭证。")
+        values[variable] = value
+    if not values.get(name):
         return "KEY_MISSING"
-    value = values[0]
+    value = values[name]
     if not _valid_key(value) or any(char in value for char in ('$', '`', '\\', '"', "'")):
         raise CredentialConfigError("backend/.env.local 凭证格式无效；不支持变量展开或命令。")
-    os.environ["OPENAI_API_KEY"] = value
+    os.environ[name] = value
     return "KEY_CONFIGURED"
 
 

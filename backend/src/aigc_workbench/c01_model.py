@@ -27,8 +27,11 @@ TIMEOUT_SECONDS = 60
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
-def credential_status() -> dict:
+def credential_status(model: str = MODEL) -> dict:
     # Never auto-load env files, read another repository's credentials, or return their values.
+    if model.startswith("qwen"):
+        return {"DASHSCOPE_API_KEY_configured": bool(os.environ.get("DASHSCOPE_API_KEY", "").strip()),
+                "account_access": "NOT_CHECKED_NO_NETWORK", "quota": "UNKNOWN"}
     return {"OPENAI_API_KEY_configured": bool(os.environ.get("OPENAI_API_KEY", "").strip()),
             "custom_endpoint_configured": bool(os.environ.get("OPENAI_BASE_URL")),
             "account_access": "NOT_CHECKED_NO_NETWORK", "quota": "UNKNOWN"}
@@ -54,7 +57,8 @@ def multimodal_request(text: str, image: bytes, media_type: str, schema: dict, s
                        model: str, max_output_tokens: int, *,
                        additional_images: tuple[tuple[bytes, str], ...] = (), output_ceiling: int = 4096) -> dict:
     """Shared serializer for the two explicit capabilities; no routing or Prompt registry."""
-    if (model != MODEL or type(max_output_tokens) is not int or output_ceiling not in {4096, 8192}
+    from .bailian_model import VISION_MODEL, vision_request
+    if (model not in {MODEL, VISION_MODEL} or type(max_output_tokens) is not int or output_ceiling not in {4096, 8192}
             or not 256 <= max_output_tokens <= output_ceiling or len(additional_images) > 1):
         raise C01Error("MODEL_PARAMETERS_INVALID", "MODEL_PREFLIGHT", "模型或输出上限不受支持。")
     if media_type not in {"image/jpeg", "image/png", "image/webp"} or not text or not image:
@@ -62,6 +66,8 @@ def multimodal_request(text: str, image: bytes, media_type: str, schema: dict, s
     images = ((image, media_type),) + additional_images
     if any(not data or mime not in {"image/jpeg", "image/png", "image/webp"} for data, mime in images):
         raise C01Error("MODEL_INPUT_INVALID", "MODEL_PREFLIGHT", "补充图片输入无效。")
+    if model == VISION_MODEL:
+        return vision_request(text, images, schema, model, max_output_tokens)
     return {
         "model": model, "store": False, "stream": False, "service_tier": "default",
         "temperature": 0, "max_output_tokens": max_output_tokens,
@@ -78,6 +84,9 @@ def multimodal_request(text: str, image: bytes, media_type: str, schema: dict, s
 
 def estimate_cost(snapshot: dict, request: dict) -> dict:
     """Conservative planning envelope, NOT a provider-enforced billing cap or exact tokenizer."""
+    from .bailian_model import VISION_MODEL, quote
+    if request["model"] == VISION_MODEL:
+        return quote(request)
     source = snapshot["context"]["capability_specific_inputs"]
     # Use unresized patches: intentionally overestimates when the provider downsizes.
     image_tokens = sum(ceil(ceil(item["width"] / 32) * ceil(item["height"] / 32) * 1.62)
@@ -97,6 +106,9 @@ def estimate_cost(snapshot: dict, request: dict) -> dict:
 
 
 def authorize(settings, confirmed: bool, max_cost_usd: str, quote: dict) -> None:
+    if quote.get("provider") == "Alibaba Bailian":
+        from .bailian_model import authorize as bailian_authorize
+        return bailian_authorize(settings, confirmed, max_cost_usd)
     if settings.environment == "pilot":
         # A business POST is the operation, not an additional fee approval. Observe cost, never cap it.
         if not settings.enable_workspace_generation or not settings.enable_c01_real or max_cost_usd != "UNRESTRICTED_PILOT":
@@ -135,10 +147,10 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None  # Even same-origin redirects must not replay a paid POST.
 
 
-def _proxy_configuration() -> tuple[dict, str]:
+def _proxy_configuration(host: str = "api.openai.com") -> tuple[dict, str]:
     """Explicit environment policy; no system-proxy discovery or failure-to-direct fallback."""
     proxies = urllib.request.getproxies_environment()
-    if urllib.request.proxy_bypass_environment("api.openai.com:443", proxies):
+    if urllib.request.proxy_bypass_environment(host + ":443", proxies):
         return {}, "DIRECT_NO_PROXY"
     selected = proxies.get("https") or proxies.get("all")
     if not selected:
@@ -181,6 +193,10 @@ def _redact_response(value: bytes, key: str, proxies: dict) -> bytes:
 class OpenAIResponsesTransport:
     """One proxy-aware HTTPS operation, fixed origin, verified TLS, no redirects or retries."""
     label = "REAL_PROVIDER_TRANSPORT"
+    origin = "https://api.openai.com"
+    credential_name = "OPENAI_API_KEY"
+    allowed_requests = {("POST", "/v1/responses"), ("POST", "/v1/images/edits"),
+                        ("GET", "/v1/models/" + MODEL)}
 
     def send(self, payload: bytes) -> HTTPResult:
         result, _ = self._request("POST", "/v1/responses", payload)
@@ -188,15 +204,14 @@ class OpenAIResponsesTransport:
 
     def _request(self, method: str, path: str, payload: bytes | None, *,
                  timeout: int = TIMEOUT_SECONDS, max_response_bytes: int = MAX_RESPONSE_BYTES) -> tuple[HTTPResult, str]:
-        if (method, path) not in {("POST", "/v1/responses"), ("POST", "/v1/images/edits"),
-                                  ("GET", "/v1/models/" + MODEL)}:
+        if (method, path) not in self.allowed_requests:
             raise C01Error("MODEL_TARGET_NOT_ALLOWED", "MODEL_TRANSPORT", "仅允许固定官方 API 目标。")
-        if os.environ.get("OPENAI_BASE_URL"):
+        if self.credential_name == "OPENAI_API_KEY" and os.environ.get("OPENAI_BASE_URL"):
             raise C01Error("CUSTOM_ENDPOINT_NOT_SUPPORTED", "MODEL_TRANSPORT", "仅支持官方固定 API 目标。")
-        key = os.environ.get("OPENAI_API_KEY", "").strip()
+        key = os.environ.get(self.credential_name, "").strip()
         if not key or "\r" in key or "\n" in key:
             raise C01Error("MODEL_CREDENTIAL_INVALID", "MODEL_TRANSPORT", "凭证缺失或格式无效。")
-        proxies, route = _proxy_configuration()
+        proxies, route = _proxy_configuration(urllib.parse.urlsplit(self.origin).hostname)
         response = None
         try:
             context = ssl.create_default_context()  # CERT_REQUIRED + hostname verification.
@@ -205,7 +220,7 @@ class OpenAIResponsesTransport:
             headers = {"Authorization": "Bearer " + key}
             if method == "POST":
                 headers["Content-Type"] = "application/json"
-            request = urllib.request.Request("https://api.openai.com" + path, data=payload,
+            request = urllib.request.Request(self.origin + path, data=payload,
                                              headers=headers, method=method)
             try:
                 response = opener.open(request, timeout=timeout)
@@ -261,6 +276,15 @@ class OpenAIResponsesTransport:
 
 
 def response_object(raw: dict, model: str) -> dict:
+    from .bailian_model import VISION_MODEL, response_text
+    if model == VISION_MODEL:
+        texts = [response_text(raw, model)]
+    else:
+        return _openai_response_object(raw, model)
+    return _json_object(texts[0])
+
+
+def _openai_response_object(raw, model):
     if raw.get("model") != model:
         raise C01Error("RESPONSE_MODEL_MISMATCH", "OUTPUT_PARSE", "响应模型与显式选择不一致。")
     if raw.get("status") != "completed":
@@ -276,6 +300,10 @@ def response_object(raw: dict, model: str) -> dict:
                 texts.append(part["text"])
     if len(texts) != 1:
         raise C01Error("MODEL_OUTPUT_MISSING", "OUTPUT_PARSE", "需要一个明确的结构化文本输出。")
+    return _json_object(texts[0])
+
+
+def _json_object(text):
     try:
         def unique_pairs(pairs):
             result = {}
@@ -284,7 +312,7 @@ def response_object(raw: dict, model: str) -> dict:
                     raise ValueError("duplicate output key")
                 result[key] = value
             return result
-        result = json.loads(texts[0], object_pairs_hook=unique_pairs)
+        result = json.loads(text, object_pairs_hook=unique_pairs)
         if not isinstance(result, dict):
             raise ValueError("object required")
     except (ValueError, TypeError) as exc:
@@ -314,3 +342,8 @@ def usage_cost(raw: dict | None) -> dict | None:
             "usd": str((inputs * INPUT_RATE + outputs * OUTPUT_RATE) / 1_000_000),
             "source": PRICING_SOURCE, "checked_on": PRICING_CHECKED,
             "note": "按全部输入标准价估算，未扣缓存优惠；不是实际账单。"}
+
+
+def vision_endpoint(model):
+    from .bailian_model import VISION_MODEL, details
+    return details(model)["endpoint"] if model == VISION_MODEL else ENDPOINT

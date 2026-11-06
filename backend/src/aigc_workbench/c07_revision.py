@@ -110,7 +110,7 @@ class C07Service(C06Service):
                     "base_image_version_id": str(base_id), "root_c06_snapshot_id": sources["root_id"],
                     "decision_snapshot_id": root["decision_snapshot_id"], "upstream_run_ids": [base["run_id"]],
                     "source_provenance": sources["source_provenance"], "context": context, "context_sha256": fingerprint(context),
-                    "parameters": image_parameters(plan), "output_plan": plan, "prompt": {"layers": composition["layers"], "planned_model_input": {
+                    "parameters": image_parameters(plan, self.image_model), "output_plan": plan, "prompt": {"layers": composition["layers"], "planned_model_input": {
                         "label": "PLANNED MODEL INPUT", "text": composition["text"], "images": sources["image_inputs"]}},
                     "actual_model_input": None, "model_api_call_attempted": False,
                     "effective_state": {"operation": "REVISION_OF_EXPLICIT_BASE", "base_image_version_id": str(base_id),
@@ -123,7 +123,7 @@ class C07Service(C06Service):
         snapshot = self.service.evidence.load_snapshot(snapshot_id)
         context = snapshot["context"]
         plan = snapshot_output_plan(snapshot)
-        if (snapshot.get("capability") != "C07" or model != MODEL or snapshot["parameters"] != image_parameters(plan)
+        if (snapshot.get("capability") != "C07" or model != self.image_model or snapshot["parameters"] != image_parameters(plan, self.image_model)
                 or context.get("output_plan", plan) != plan
                 or context["effective_constraints"]["current_slot_size"] != plan["requested_output_size"]
                 or fingerprint(context) != snapshot["context_sha256"]
@@ -137,9 +137,14 @@ class C07Service(C06Service):
             raise C01Error("REVISION_SOURCE_CHANGED", "MODEL_PREFLIGHT", "基础图片或当前有效约束已变化，请重新核对；未调用。")
         images = [{"image_url": "data:" + item["media_type"] + ";base64," + base64.b64encode(data).decode()}
                   for item, data in zip(sources["image_inputs"], sources["bytes"])]
-        request = {**image_parameters(plan), "prompt": snapshot["prompt"]["planned_model_input"]["text"], "images": images}
-        return {"snapshot": snapshot, "request": request, "request_sha256": fingerprint(request), "endpoint": ENDPOINT,
-                "cost": estimate_image_cost(request["prompt"], image_count=3, model_size=request["size"]), "network_requests": 0}
+        request = {**image_parameters(plan, self.image_model), "prompt": snapshot["prompt"]["planned_model_input"]["text"], "images": images}
+        from .bailian_model import IMAGE_MODEL, image_request, quote, details
+        endpoint, cost = ENDPOINT, estimate_image_cost(request["prompt"], image_count=3, model_size=request["size"])
+        if model == IMAGE_MODEL:
+            request = image_request(image_parameters(plan, model), request["prompt"], images)
+            endpoint, cost = details(model)["endpoint"], quote(request)
+        return {"snapshot": snapshot, "request": request, "request_sha256": fingerprint(request), "endpoint": endpoint,
+                "cost": cost, "network_requests": 0}
 
     def run(self, *args, **kwargs):
         if os.environ.get("AIGC_ENABLE_C07_REAL") != "1":

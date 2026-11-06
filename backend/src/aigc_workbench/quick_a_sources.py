@@ -5,7 +5,7 @@ from hashlib import sha256
 from uuid import UUID, uuid4
 
 from .c01_context import C01Error, applicable_rules, fingerprint, now
-from .c01_model import ENDPOINT, MODEL, estimate_cost, multimodal_request
+from .c01_model import vision_endpoint, MODEL, estimate_cost, multimodal_request
 from .c01_prompt import OUTPUT_CONTRACT, compose_prompt
 from .c01_real import C01RealService
 from .domain import AssetRole
@@ -73,7 +73,7 @@ class ProductUnderstandingService(C01RealService):
         request = multimodal_request(snapshot['prompt']['planned_model_input']['text'], frozen,
                                      asset.image.media_type, OUTPUT_CONTRACT, 'c01_visual_observation', model, max_output_tokens)
         return {"snapshot": snapshot, "request": request, "request_sha256": fingerprint(request),
-                "endpoint": ENDPOINT, "cost": estimate_cost(snapshot, request), "network_requests": 0}
+                "endpoint": vision_endpoint(model), "cost": estimate_cost(snapshot, request), "network_requests": 0}
 
 
 def usable_run(run, test_mode=False):

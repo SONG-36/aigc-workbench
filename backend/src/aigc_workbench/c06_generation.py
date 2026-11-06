@@ -29,7 +29,10 @@ PARAMETERS = {"model": MODEL, "size": "1024x1536", "quality": "high", "complexit
               "n": 1, "stream": False, "output_format": "png"}
 
 
-def image_parameters(plan: dict) -> dict:
+def image_parameters(plan: dict, model: str = MODEL) -> dict:
+    from .bailian_model import IMAGE_MODEL, image_parameters as bailian_parameters
+    if model == IMAGE_MODEL:
+        return bailian_parameters(plan)
     return {**PARAMETERS, "size": plan["model_generation_size"]}
 
 
@@ -99,6 +102,9 @@ class C06Service(C01RealService):
         if test_mode and settings.environment != 'development':
             raise C01Error('TEST_OUTPUT_DISABLED', 'ACCESS', 'TEST_ONLY输出仅允许隔离的开发环境。')
         self.test_mode = test_mode
+        from .bailian_model import selected_provider, IMAGE_MODEL
+        self.image_model = IMAGE_MODEL if selected_provider() == "bailian" else MODEL
+        self._downloaded_png = None
 
     def prepare_current_decision(self, run):
         """Derive an immutable execution handoff from the saved current-slot result, not a CLI file."""
@@ -129,7 +135,7 @@ class C06Service(C01RealService):
                     raise C01Error('C06_HANDOFF_CHANGED', 'SOURCE_SELECTION', '已有制作交接文件不同，未覆盖。')
             else:
                 private_write(path, data)
-        return self.prepare(UUID(snapshot['id']), directory, MODEL)
+        return self.prepare(UUID(snapshot['id']), directory, self.image_model)
 
     def _current_decision_sources(self, decision_id, directory):
         from .quick_a_sources import usable_run
@@ -221,7 +227,7 @@ class C06Service(C01RealService):
                 "images": images, "slot_state": current_slot}
 
     def prepare(self, decision_id: UUID, handoff_directory: Path, model: str) -> dict:
-        if model != MODEL:
+        if model != self.image_model:
             raise C01Error("C06_MODEL_NOT_SUPPORTED", "MODEL_PREFLIGHT", "仅使用显式指定图像模型，不切换。")
         sources = self._sources(decision_id, handoff_directory)
         old = sources["decision_snapshot"]
@@ -245,13 +251,13 @@ class C06Service(C01RealService):
                     "prompt": {"planned_model_input": {"label": "PLANNED MODEL INPUT", "text": prompt,
                                                        "images": planned_images}},
                     "actual_model_input": None, "input_classification": "PLANNED MODEL INPUT",
-                    "model_api_call_attempted": False, "parameters": image_parameters(plan), "output_plan": plan}
+                    "model_api_call_attempted": False, "parameters": image_parameters(plan, self.image_model), "output_plan": plan}
         return self.service.evidence.save_snapshot(snapshot, base64.b64decode(sources["images"][0]["image_url"].split(",", 1)[1]))
 
     def preflight(self, snapshot_id: UUID, model: str, max_output_tokens: int = 4096) -> dict:
         snapshot = self.service.evidence.load_snapshot(snapshot_id)
         plan = snapshot_output_plan(snapshot)
-        if (model != MODEL or snapshot.get("capability") != "C06" or snapshot.get("parameters") != image_parameters(plan)
+        if (model != self.image_model or snapshot.get("capability") != "C06" or snapshot.get("parameters") != image_parameters(plan, self.image_model)
                 or fingerprint(snapshot["context"]) != snapshot["context_sha256"]):
             raise C01Error("C06_SNAPSHOT_INVALID", "MODEL_PREFLIGHT", "C06模型、参数或快照不一致。")
         sources = self._sources(UUID(snapshot["decision_snapshot_id"]), Path(snapshot["handoff_directory"]))
@@ -262,11 +268,16 @@ class C06Service(C01RealService):
                 or self.service.evidence.read_snapshot_image(snapshot)
                 != base64.b64decode(sources["images"][0]["image_url"].split(",", 1)[1])):
             raise C01Error("C06_SOURCE_CHANGED", "MODEL_PREFLIGHT", "C06制作依据、要求或原图变化。")
-        request = {**image_parameters(plan), "prompt": snapshot["prompt"]["planned_model_input"]["text"],
+        request = {**image_parameters(plan, self.image_model), "prompt": snapshot["prompt"]["planned_model_input"]["text"],
                    "images": [{"image_url": part["image_url"]} for part in sources["images"]]}
+        from .bailian_model import IMAGE_MODEL, image_request, quote, details
+        endpoint, cost = ENDPOINT, estimate_image_cost(request["prompt"], model_size=request["size"])
+        if model == IMAGE_MODEL:
+            request = image_request(image_parameters(plan, model), request["prompt"], sources["images"])
+            endpoint, cost = details(model)["endpoint"], quote(request)
         return {"label": "C06 PLANNED MODEL INPUT / NO REQUEST SENT", "snapshot": snapshot,
-                "request": request, "request_sha256": fingerprint(request), "endpoint": ENDPOINT,
-                "cost": estimate_image_cost(request["prompt"], model_size=request["size"]), "credentials": credential_status(),
+                "request": request, "request_sha256": fingerprint(request), "endpoint": endpoint,
+                "cost": cost, "credentials": credential_status(model),
                 "model_api_call_attempted": False, "network_requests": 0}
 
     def parse_output(self, raw: dict, model: str) -> dict:
@@ -283,36 +294,72 @@ class C06Service(C01RealService):
             return self.parse_output(raw, model)  # Historical native portrait snapshots.
         if raw.get("model", model) != model:
             raise C01Error("C06_RESPONSE_MODEL_MISMATCH", "OUTPUT_PARSE", "响应模型与指定模型不同。")
-        native = png_from_response(raw)
+        native = self.native_png(raw)
         plan = snapshot_output_plan(snapshot)
         final = final_png(native, plan)
         return {"image": asdict(inspect_image(final, "image/png")),
                 "native_image": asdict(inspect_image(native, "image/png")), **plan,
                 "status": "CANDIDATE_REVIEW_PENDING", "operator_approved": False}
 
+    def prepare_response(self, raw, record):
+        from .bailian_model import IMAGE_MODEL, download_png
+        if record["requested_model"] != IMAGE_MODEL:
+            return
+        self.store.save(record)  # Durably retain the native URL response BEFORE a potentially slow download.
+        self._downloaded_png = download_png(raw)
+        directory = self.settings.data_dir / "provider_outputs"
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path = directory / (UUID(record["run_id"]).hex + ".png")
+        private_write(path, self._downloaded_png)
+        record["downloaded_output"] = {"file": str(path.resolve()),
+            "sha256": sha256(self._downloaded_png).hexdigest(), "size_bytes": len(self._downloaded_png),
+            "source": "ACTUAL_PROVIDER_RESULT_URL" if record["model_api_call_attempted"] else "ACTUAL_TEST_ADAPTER_RESULT_URL / TEST_ONLY", "authorization_header_forwarded": False}
+
+    def native_png(self, raw, record=None):
+        from .bailian_model import IMAGE_MODEL
+        if self.image_model != IMAGE_MODEL:
+            return png_from_response(raw)
+        if record is not None:
+            path = self.settings.data_dir / "provider_outputs" / (UUID(record["run_id"]).hex + ".png")
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(descriptor, "rb") as stream:
+                content = stream.read(10 * 1024 * 1024 + 1)
+            if sha256(content).hexdigest() != record["downloaded_output"]["sha256"]:
+                raise C01Error("PROVIDER_IMAGE_CORRUPT", "CANDIDATE_SAVE", "下载PNG身份不一致。")
+            return content
+        if self._downloaded_png is None:
+            raise C01Error("PROVIDER_IMAGE_MISSING", "OUTPUT_PARSE", "缺少已下载的真实PNG。")
+        return self._downloaded_png
+
     def cost_from_usage(self, raw: dict) -> dict | None:
-        return image_usage_cost(raw)
+        from .bailian_model import IMAGE_MODEL, usage_cost
+        return usage_cost(raw) if self.image_model == IMAGE_MODEL else image_usage_cost(raw)
 
     def run(self, snapshot_id: UUID, model: str, operation_id: UUID, *, confirmed: bool,
             max_cost_usd: str, transport=None) -> dict:
+        from .bailian_model import IMAGE_MODEL, POLICY, BailianTransport
+        bailian = self.image_model == IMAGE_MODEL and max_cost_usd == POLICY
         pilot = self.settings.environment == "pilot" and max_cost_usd == "UNRESTRICTED_PILOT"
         try:
             budget = Decimal(max_cost_usd)
             valid_budget = budget.is_finite() and 0 < budget <= 1
         except (ValueError, ArithmeticError, TypeError):
             valid_budget = False
-        if os.environ.get("AIGC_ENABLE_C06_REAL") != "1" or not (pilot or valid_budget):
+        if os.environ.get("AIGC_ENABLE_C06_REAL") != "1" or not (bailian or pilot or valid_budget):
             raise C01Error("C06_EXECUTION_DISABLED", "ACCESS",
                            "Pilot真实图像执行未启用或执行策略不一致。" if self.settings.environment == "pilot"
                            else "需显式启用C06，且本次估算门槛不超过USD1。")
         record = super().run(snapshot_id, model, operation_id, confirmed=confirmed,
-                             max_cost_usd=max_cost_usd, transport=transport or OpenAIImageEditsTransport())
+                             max_cost_usd=max_cost_usd, transport=transport or (BailianTransport(model) if bailian else OpenAIImageEditsTransport()))
         test_output = self.test_mode and record['transport_label'] == 'OFFLINE_TRANSPORT_TEST'
         if record["status"] == "SUCCEEDED" and (record["transport_label"] == "REAL_PROVIDER_TRANSPORT" or test_output):
             snapshot = self.service.evidence.load_snapshot(snapshot_id)
-            native = png_from_response(record["offline_test_response"] if test_output else record["actual_model_response"])
+            native = self.native_png(record["offline_test_response"] if test_output else record["actual_model_response"], record)
             final = final_png(native, snapshot_output_plan(snapshot))
             store = CandidateStore(self.store.database, self.settings.data_dir)
-            candidate = store.save(record, snapshot, final, test_only=True) if test_output else store.save(record, snapshot, final)
+            if bailian:
+                candidate = store.save(record, snapshot, final, test_only=test_output, native_png=native)
+            else:
+                candidate = store.save(record, snapshot, final, test_only=True) if test_output else store.save(record, snapshot, final)
             return {**record, "candidate": candidate}
         return record

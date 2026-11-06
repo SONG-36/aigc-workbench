@@ -51,19 +51,26 @@ class C01RealService:
         return self.parse_output(raw, model)
 
     def cost_from_usage(self, raw: dict) -> dict | None:
-        return usage_cost(raw)
+        from .bailian_model import VISION_MODEL, usage_cost as bailian_cost
+        return bailian_cost(raw) if raw.get("model") in {VISION_MODEL, "qwen3.7-plus-2026-05-26"} else usage_cost(raw)
+
+    def prepare_response(self, raw: dict, record: dict) -> None:
+        """Optional provider artifact handling, after preserving the native response."""
 
     def run(self, snapshot_id: UUID, model: str, operation_id: UUID, *, confirmed: bool,
             max_cost_usd: str, max_output_tokens: int = 4096, transport=None) -> dict:
         # No DB migration or Run creation before opt-in, quote, source and credentials checks.
         preflight = self.preflight(snapshot_id, model, max_output_tokens)
         authorize(self.settings, confirmed, max_cost_usd, preflight["cost"])
-        transport = transport or OpenAIResponsesTransport()
+        from .bailian_model import VISION_MODEL, IMAGE_MODEL, BailianTransport, details
+        is_bailian = model in {VISION_MODEL, IMAGE_MODEL}
+        metadata = details(model) if is_bailian else None
+        transport = transport or (BailianTransport(model) if is_bailian else OpenAIResponsesTransport())
         if transport.label not in {"REAL_PROVIDER_TRANSPORT", "OFFLINE_TRANSPORT_TEST"}:
             raise C01Error("TRANSPORT_INVALID", "ACCESS", "未识别的实验传输方式。")
         self.store.database.initialize()
         record, created = self.store.start(preflight["snapshot"], operation_id, preflight["request"],
-                                          preflight["cost"], max_cost_usd, transport.label)
+                                          preflight["cost"], max_cost_usd, transport.label, execution_metadata=metadata)
         if not created:
             return record  # Including OUTCOME_UNKNOWN/RUNNING: never replay the paid request.
         # Persist exact request bytes + dispatch intent BEFORE any network operation.
@@ -103,6 +110,7 @@ class C01RealService:
             record["usage_based_cost_estimate"] = self.cost_from_usage(raw) if record["model_api_call_attempted"] else None
             if not 200 <= response.status < 300:
                 raise C01Error("MODEL_HTTP_ERROR", "MODEL_TRANSPORT", f"供应商 HTTP {response.status}；不重试。")
+            self.prepare_response(raw, record)
             result = self.parse_execution_output(raw, model, preflight["snapshot"])
             record["structured_output"] = {"label": ("AI_DERIVED / NOT HUMAN EVALUATED" if record["model_api_call_attempted"]
                                                        else "OFFLINE_TEST_ONLY"), "content": result}

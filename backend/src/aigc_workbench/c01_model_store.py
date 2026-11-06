@@ -31,7 +31,7 @@ class C01ModelStore:
         return self._decode(row)
 
     def start(self, snapshot: dict, operation_id: UUID, request: dict, quote: dict,
-              budget: str, transport_label: str) -> tuple[dict, bool]:
+              budget: str, transport_label: str, *, execution_metadata: dict | None = None) -> tuple[dict, bool]:
         request_hash = fingerprint(request)
         with self.database.connection(write=True) as db:
             old = db.execute("SELECT * FROM c01_model_runs WHERE operation_id=?", (str(operation_id),)).fetchone()
@@ -60,6 +60,9 @@ class C01ModelStore:
                 "business_state_changed": False, "human_evaluation": "NOT_PERFORMED",
                 "note": "RUNNING 只表示未可靠完成，可能进程已结束；禁止自动或盲目重新付费。",
             }
+            if execution_metadata:
+                record.update(execution_metadata, user_max_cost_usd=None,
+                              execution_policy="EXPLICIT_DEVELOPMENT_ONE_SHOT / CNY_QUOTE_NOT_USD_CAP")
             if snapshot["capability"] in {"C02", "C03_C04_C05", "C06", "C07"}:
                 record.update(capability=snapshot["capability"], task_id=snapshot["task_id"], slot_id=snapshot["slot_id"],
                               reference_asset_id=snapshot["reference_asset_id"])
