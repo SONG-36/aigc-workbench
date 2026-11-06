@@ -136,7 +136,7 @@ def test_v9_additive_migration_and_transactional_rollback_preserve_existing_data
         assert 'initial_overall_requirement' not in [r[1] for r in db.execute('pragma table_info(task_creations)')]
     monkeypatch.setattr(persistence,'V9_TABLES',statements);database.initialize()
     with database.connection() as db:
-        assert db.execute('pragma user_version').fetchone()[0]==9
+        assert db.execute('pragma user_version').fetchone()[0]==10
         assert [tuple(r) for r in db.execute('select * from task_drafts')]==before
     with TestClient(create_app(config),base_url='http://localhost') as client:
         assert client.get('/api/tasks/'+original['id']).json()==original

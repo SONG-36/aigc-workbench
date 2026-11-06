@@ -101,7 +101,7 @@ describe('F01 frontend with explicit HTTP mocks (not browser or AI acceptance)',
     expect(screen.getByLabelText('选择商品图片')).toBeInTheDocument()
     expect(screen.getByLabelText('整体运营要求')).not.toBeDisabled()
     expect(screen.getByText(/作用于本任务全部图位的后续生成/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /添加卖点图/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /添加卖点图/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Pass' })).not.toBeInTheDocument()
   })
 

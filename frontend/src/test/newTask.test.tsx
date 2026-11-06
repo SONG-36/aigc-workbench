@@ -22,8 +22,8 @@ it('saves two sources and a configured slot once, then restores server state wit
   const http = taskHttp(task), fetchMock = vi.fn(http.handle); vi.stubGlobal('fetch', fetchMock)
   mount(); const user = userEvent.setup()
   await user.type(screen.getByLabelText('任务名称'), task.title); await chooseImages(user)
-  await user.selectOptions(screen.getByLabelText('新建输出尺寸'), '1536x1536')
-  await user.type(screen.getByLabelText('新建图位要求'), '保留商品附件')
+  await user.selectOptions(screen.getByLabelText('主图新建输出尺寸'), '1536x1536')
+  await user.type(screen.getByLabelText('主图新建图位要求'), '保留商品附件')
   await user.type(screen.getByLabelText('整体运营要求'), 'GLOBAL_FORM_REQUIREMENT')
   expect(fetchMock).not.toHaveBeenCalled()
   await user.click(screen.getByRole('button', {name: '保存任务和资料，进入工作台'}))
@@ -48,7 +48,7 @@ it('retains unsaved files after an upload rejection, resumes after reload, and s
   const first = mount(); const user = userEvent.setup()
   await user.type(screen.getByLabelText('任务名称'), task.title); await chooseImages(user)
   await user.click(screen.getByRole('button', {name: '保存任务和资料，进入工作台'}))
-  expect(await screen.findByRole('alert')).toHaveTextContent('保存营销参考失败')
+  expect(await screen.findByRole('alert')).toHaveTextContent('保存参考图片失败')
   expect(screen.getByText(/reference.png · 待保存/)).toBeInTheDocument()
   expect(http.saved().assets).toHaveLength(1)
   const before = fetchMock.mock.calls.length; first.unmount(); mount()
@@ -78,4 +78,31 @@ it('replays a lost upload response with its original identity, without a duplica
   expect(http.saved().assets).toHaveLength(2)
   const calls = fetchMock.mock.calls.filter(([p]) => p.includes('/assets?role=product_image'))
   expect(calls).toHaveLength(2); expect(calls[0][0]).toBe(calls[1][0]); expect(calls[0][1]?.body).toBe(calls[1][1]?.body)
+})
+
+it('saves independent slot files and resumes a failed binding without recreating sources or slots', async () => {
+  const http=taskHttp(task);let fail=true
+  const fetchMock=vi.fn(async(path:string,options?:RequestInit)=>{
+    if(fail&&options?.method==='PUT'&&path.includes('/slots/')){fail=false;return json({error:{message:'binding unavailable'}},503)}
+    return http.handle(path,options)
+  });vi.stubGlobal('fetch',fetchMock)
+  const first=mount(),user=userEvent.setup();await user.type(screen.getByLabelText('任务名称'),task.title);await chooseImages(user)
+  await user.upload(screen.getByLabelText('同类商品对比图参考图片'),new File(['compare'],'compare.png',{type:'image/png'}))
+  for(const number of ['01','02']){
+    await user.click(screen.getByRole('button',{name:'＋ 添加卖点图'}))
+    await user.upload(screen.getByLabelText(`卖点图 ${number}参考图片`),new File([number],`selling-${number}.png`,{type:'image/png'}))
+  }
+  await user.click(screen.getByRole('button',{name:'保存任务和资料，进入工作台'}))
+  expect(await screen.findByRole('alert')).toHaveTextContent('自动绑定与保存配置失败')
+  expect(http.saved().assets).toHaveLength(2);expect(http.saved().slots).toHaveLength(1)
+  expect(http.saved().slots[0].reference_asset_id).toBeNull()
+  const uploadCount=()=>fetchMock.mock.calls.filter(([p])=>p.includes('/assets?')).length
+  expect(uploadCount()).toBe(2)
+  first.unmount();mount();await screen.findByText(/selling-02.png · 待保存/)
+  await waitFor(()=>expect(screen.getByRole('button',{name:'保存任务和资料，进入工作台'})).not.toBeDisabled())
+  await user.click(screen.getByRole('button',{name:'保存任务和资料，进入工作台'}));await screen.findByTestId('task-id')
+  expect(http.saved().slots).toHaveLength(4);expect(http.saved().assets).toHaveLength(5);expect(uploadCount()).toBe(5)
+  expect(fetchMock.mock.calls.filter(([p,o])=>p==='/api/tasks'&&o?.method==='POST')).toHaveLength(1)
+  expect(http.saved().slots.map(s=>http.saved().assets.find(a=>a.id===s.reference_asset_id)?.filename))
+    .toEqual(['reference.png','compare.png','selling-01.png','selling-02.png'])
 })

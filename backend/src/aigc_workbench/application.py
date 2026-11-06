@@ -28,6 +28,9 @@ class TaskChanges(Protocol):
     def slot_creation(self, task_id: UUID, operation_id: UUID) -> ImageSlot | None: ...
     def add_slot(self, slot: ImageSlot, operation_id: UUID) -> None: ...
     def update_slot(self, slot: ImageSlot) -> None: ...
+    def slot_removal(self, task_id: UUID, operation_id: UUID) -> UUID | None: ...
+    def slot_has_active_execution(self, task_id: UUID, slot_id: UUID) -> bool: ...
+    def archive_slot(self, task_id: UUID, slot_id: UUID, operation_id: UUID, removed_at: str) -> None: ...
 
 
 class TaskStore(Protocol):
@@ -137,6 +140,26 @@ class TaskService:
             slot = task.new_slot(kind)
             changes.add_slot(slot, operation_id)
         return slot
+
+    def remove_slot(self, task_id: UUID, slot_id: UUID, operation_id: UUID) -> Task:
+        with self.store.write() as changes:
+            task = require_task(changes.get_task(task_id))
+            prior = changes.slot_removal(task_id, operation_id)
+            if prior:
+                if prior != slot_id:
+                    raise Conflict("同一删除操作不能用于其他图位。")
+                return task
+            slot = next((s for s in task.slots if s.id == slot_id), None)
+            if slot is None:
+                raise TaskNotFound("当前任务没有该图位。")
+            if slot.kind not in {SlotKind.SELLING_POINT, SlotKind.SCENE}:
+                raise Conflict("仅卖点和场景图位支持移除；固定图位可移除参考。")
+            if slot.archived:
+                raise Conflict("该图位已移除，历史仍保留。")
+            if changes.slot_has_active_execution(task_id, slot_id):
+                raise Conflict("本图位有进行中或结果未知的执行，先查询处理，不能移除。")
+            changes.archive_slot(task_id, slot_id, operation_id, datetime.now(timezone.utc).isoformat())
+            return require_task(changes.get_task(task_id))
 
     def configure_slot(self, task_id: UUID, slot_id: UUID, reference_id: UUID | None,
                        output_size: str, requirements: str) -> ImageSlot:

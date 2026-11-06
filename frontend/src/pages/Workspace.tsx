@@ -25,9 +25,8 @@ function SavedWorkspace({ initial }: { initial: TaskDraft }) {
   }), [])
   return <WorkspaceShell task={task} output={<GenerationWorkspace task={task} locked={write.locked || overallDirty} unsavedSlots={unsavedSlots} />}>
     <WriteFeedback write={write} />
-    <div className="asset-columns">
+    <div className="product-assets">
       <AssetUploader task={task} role="product_image" write={write} onSaved={setTask} />
-      <AssetUploader task={task} role="marketing_reference" write={write} onSaved={setTask} />
     </div>
     <SlotPanel task={task} write={write} onSaved={setTask} onDirty={onDirty} />
     <OverallRequirements task={task} write={write} onSaved={setTask} onDirty={setOverallDirty} />

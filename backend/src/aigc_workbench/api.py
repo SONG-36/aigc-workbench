@@ -75,6 +75,7 @@ class SlotResponse(BaseModel):
     output_size: str
     requirements: str
     inputs_ready: bool
+    archived: bool
 
 
 class TaskResponse(BaseModel):
@@ -102,9 +103,22 @@ class TaskResponse(BaseModel):
             assets=[AssetResponse.from_asset(a) for a in task.assets],
             slots=[SlotResponse(id=s.id, task_id=s.task_id, kind=s.kind, position=s.position,
                                 reference_asset_id=s.reference_asset_id, output_size=s.output_size,
-                                requirements=s.requirements, inputs_ready=task.slot_inputs_ready(s))
+                                requirements=s.requirements, inputs_ready=task.slot_inputs_ready(s), archived=s.archived)
                    for s in task.slots],
         )
+
+
+class UploadAssetResponse(TaskResponse):
+    uploaded_asset_id: UUID
+
+
+class CreateSlotResponse(TaskResponse):
+    created_slot_id: UUID
+
+
+class RemoveSlotRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operation_id: UUID
 
 
 def task_service(request: Request) -> TaskService:
@@ -219,7 +233,7 @@ def save_overall_requirement(task_id: UUID, body: SaveOverallRequirementRequest,
     return TaskResponse.from_task(service.save_overall_requirement(task_id, body.text, body.expected_version, body.operation_id))
 
 
-@router.post("/tasks/{task_id}/assets", response_model=TaskResponse, status_code=201)
+@router.post("/tasks/{task_id}/assets", response_model=UploadAssetResponse, status_code=201)
 async def upload_asset(task_id: UUID, request: Request, service: Service, role: AssetRole,
                        operation_id: UUID, filename: Annotated[str, Query(min_length=1, max_length=180)]):
     # Raw file body avoids multipart spooling before our explicit byte limit.
@@ -231,9 +245,9 @@ async def upload_asset(task_id: UUID, request: Request, service: Service, role: 
             content.extend(chunk)
     except ClientDisconnect as exc:
         raise HTTPException(400, "上传中断，未保存素材。") from exc
-    await run_in_threadpool(service.upload_asset, task_id, operation_id, role, filename,
+    asset = await run_in_threadpool(service.upload_asset, task_id, operation_id, role, filename,
                             bytes(content), request.headers.get("content-type", "application/octet-stream"))
-    return TaskResponse.from_task(await run_in_threadpool(service.get_draft, task_id))
+    return UploadAssetResponse(**TaskResponse.from_task(await run_in_threadpool(service.get_draft, task_id)).model_dump(), uploaded_asset_id=asset.id)
 
 
 @router.get("/tasks/{task_id}/assets/{asset_id}/content")
@@ -246,13 +260,18 @@ def asset_content(task_id: UUID, asset_id: UUID, service: Service) -> Response:
     })
 
 
-@router.post("/tasks/{task_id}/slots", response_model=TaskResponse, status_code=201)
+@router.post("/tasks/{task_id}/slots", response_model=CreateSlotResponse, status_code=201)
 def create_slot(task_id: UUID, body: CreateSlotRequest, service: Service) -> TaskResponse:
-    service.create_slot(task_id, body.operation_id, body.kind)
-    return TaskResponse.from_task(service.get_draft(task_id))
+    slot = service.create_slot(task_id, body.operation_id, body.kind)
+    return CreateSlotResponse(**TaskResponse.from_task(service.get_draft(task_id)).model_dump(), created_slot_id=slot.id)
 
 
 @router.put("/tasks/{task_id}/slots/{slot_id}", response_model=TaskResponse)
 def configure_slot(task_id: UUID, slot_id: UUID, body: ConfigureSlotRequest, service: Service) -> TaskResponse:
     service.configure_slot(task_id, slot_id, body.reference_asset_id, body.output_size, body.requirements)
     return TaskResponse.from_task(service.get_draft(task_id))
+
+
+@router.post("/tasks/{task_id}/slots/{slot_id}/remove", response_model=TaskResponse)
+def remove_slot(task_id: UUID, slot_id: UUID, body: RemoveSlotRequest, service: Service):
+    return TaskResponse.from_task(service.remove_slot(task_id, slot_id, body.operation_id))

@@ -35,9 +35,9 @@ function decodeTask(value: unknown): TaskDraft {
       && a.url === `/api/tasks/${t.id}/assets/${a.id}/content`
       && typeof a.sha256 === 'string' && typeof a.filename === 'string')
     || !t.slots.every(s => s.task_id === t.id && typeof s.id === 'string'
-      && ['main', 'comparison', 'selling_point', 'scene'].includes(s.kind)
+      && ['main', 'dimensions', 'comparison', 'selling_point', 'scene'].includes(s.kind)
       && OUTPUT_SIZES.includes(s.output_size)
-      && typeof s.inputs_ready === 'boolean')) {
+      && typeof s.inputs_ready === 'boolean' && (s.archived===undefined||typeof s.archived==='boolean'))) {
     throw new ApiError('服务器返回的任务格式不符合当前接口，未应用该状态。', 'unknown')
   }
   const r = t.overall_requirement
@@ -71,16 +71,18 @@ export async function listTasks(signal?: AbortSignal): Promise<TaskDraft[]> {
 
 export async function uploadAsset(taskId: string, role: AssetRole, file: File, operationId: string) {
   const query = new URLSearchParams({ role, operation_id: operationId, filename: file.name })
-  return decodeTask(await request(`/tasks/${taskId}/assets?${query}`, {
+  const raw = await request(`/tasks/${taskId}/assets?${query}`, {
     method: 'POST', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file,
-  }))
+  })
+  return Object.assign(decodeTask(raw), {uploaded_asset_id: (raw as {uploaded_asset_id?: string}).uploaded_asset_id})
 }
 
 export async function createSlot(taskId: string, kind: SlotKind, operationId: string) {
-  return decodeTask(await request(`/tasks/${taskId}/slots`, {
+  const raw = await request(`/tasks/${taskId}/slots`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ kind, operation_id: operationId }),
-  }))
+  })
+  return Object.assign(decodeTask(raw), {created_slot_id: (raw as {created_slot_id?: string}).created_slot_id})
 }
 
 export async function configureSlot(taskId: string, slot: ImageSlot,
@@ -100,4 +102,11 @@ export async function saveOverallRequirement(taskId: string, text: string, expec
     throw new ApiError('服务器未确认本次要求版本，请重新读取核对；未应用为保存成功。', 'unknown')
   }
   return task
+}
+
+
+export async function removeSlot(taskId: string, slotId: string, operationId: string) {
+  return decodeTask(await request(`/tasks/${taskId}/slots/${slotId}/remove`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({operation_id:operationId}),
+  }))
 }

@@ -1,37 +1,18 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import {Overlay} from './ImageOverlay'
+import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import type { ImageSlot, TaskDraft } from '../types'
 import { useSlotGeneration } from '../hooks/useSlotGeneration'
 import type { ExecutionState } from '../api/generation'
 import { RevisionPanel, ReviewPanel, type RevisionDrafts } from './RevisionReviewPanel'
 
-const kinds = { main: '主图', comparison: '同类商品对比图', selling_point: '卖点图', scene: '场景图' }
+const kinds = { main: '主图', dimensions: '尺寸图', comparison: '同类商品对比图', selling_point: '卖点图', scene: '场景图' }
 const labels: Record<ExecutionState, string> = {
   NOT_STARTED: '尚未开始', RUNNING: '执行中', SUCCEEDED: '成功并产生候选', FAILED: '执行失败', OUTCOME_UNKNOWN: '结果未知',
 }
 const phases: Record<string, string> = { PREPARING: '准备中', C01: '商品理解中', C02: '参考理解中',
   C03_C04_C05: '制作决定中', C06: '图片生成中', C07: '图片修改中', REVIEW_PENDING: '候选待审核' }
 
-function Overlay({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  const box = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null
-    box.current?.querySelector<HTMLButtonElement>('button')?.focus()
-    return () => previous?.focus()
-  }, [])
-  return <div className="overlay" onClick={event => { if (event.target === event.currentTarget) onClose() }}>
-    <div ref={box} className="overlay-panel" role="dialog" aria-modal="true" aria-label={title} onKeyDown={event => {
-      if (event.key === 'Escape') onClose()
-      if (event.key === 'Tab') {
-        const nodes = box.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input')
-        if (!nodes?.length) return
-        const first = nodes[0], last = nodes[nodes.length - 1]
-        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
-        if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
-      }
-    }}><div className="section-head"><h3>{title}</h3><button onClick={onClose}>关闭</button></div>{children}</div>
-  </div>
-}
 
 function SlotOutput({ task, slot, locked, draft, setDraft }: {
   task: TaskDraft; slot: ImageSlot; locked: boolean; draft: RevisionDrafts; setDraft: (draft: RevisionDrafts) => void
@@ -136,11 +117,12 @@ export function GenerationWorkspace({ task, locked, unsavedSlots }: {
 }) {
   const [search, setSearch] = useSearchParams()
   const [drafts, setDrafts] = useState<Record<string, RevisionDrafts>>({})
-  const selected = task.slots.find(s => s.id === search.get('slot')) || task.slots[0]
+  const slots = task.slots.filter(s=>!s.archived)
+  const selected = slots.find(s => s.id === search.get('slot')) || slots[0]
   if (!selected) return <><button disabled>生成一张候选</button>
     <div className="empty">请先保存一个图位；尚未开始生成。</div></>
   return <div className="output-layout"><nav className="output-slots" aria-label="选择制作图位">
-    {task.slots.map(s => <button key={s.id} aria-pressed={s.id === selected.id} onClick={() => {
+    {slots.map(s => <button key={s.id} aria-pressed={s.id === selected.id} onClick={() => {
       setSearch(previous => { const next = new URLSearchParams(previous); next.set('slot', s.id); return next }, { replace: true })
     }}>{kinds[s.kind]}{['selling_point', 'scene'].includes(s.kind)
       ? ` ${task.slots.filter(item => item.kind === s.kind).findIndex(item => item.id === s.id) + 1}` : ''}</button>)}

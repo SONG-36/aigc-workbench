@@ -212,31 +212,16 @@ describe('S01 deterministic UI contracts with explicit HTTP mocks', () => {
     expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[2][1].body)
   })
 
-  it('persists a reference binding instead of treating the selection as saved', async () => {
-    const reference = { ...asset, id: 'a2a940a8-35e4-4516-a783-f0a10e80e8bf', role: 'marketing_reference' as const,
-      filename: 'reference.png', url: `/api/tasks/${task.id}/assets/a2a940a8-35e4-4516-a783-f0a10e80e8bf/content` }
+  it('uploads and auto-binds directly in the slot without a shared-reference selection', async () => {
     const slot = { id: 'bb38f83b-0fda-4c77-b559-fbc089ef413d', task_id: task.id, kind: 'main' as const,
-      position: 0, reference_asset_id: null, output_size: '1024x1536', requirements: '', inputs_ready: false }
-    const current = { ...task, assets: [asset, reference], slots: [slot] }
-    const updated = { ...current, materials_ready: true, slots: [{ ...slot, reference_asset_id: reference.id, inputs_ready: true }] }
-    const fetchMock = vi.fn().mockImplementation((path, options) => {
-      if (path.endsWith('/workspace')) return Promise.resolve(json({
-        task_id: task.id, slot_id: slot.id, state: 'NOT_STARTED', candidates: [], executions: [],
-        readiness: { can_generate: false, reason: '无有效制作决定' },
-      }))
-      return Promise.resolve(json(options?.method === 'PUT' ? updated : current))
-    })
-    vi.stubGlobal('fetch', fetchMock)
-    mount(`/workspace/${task.id}`)
-    await screen.findByTestId('task-id')
-    const user = userEvent.setup()
-    await user.selectOptions(screen.getByLabelText('主图主要营销参考'), reference.id)
-    expect(screen.getByText(/有未保存配置/)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '保存主图配置' }))
-    expect(await screen.findByText(/图位配置已保存 · 本图基础素材齐备/)).toBeInTheDocument()
-    const saved = fetchMock.mock.calls.find(([, options]) => options?.method === 'PUT')!
-    expect(saved[0]).toBe(`/api/tasks/${task.id}/slots/${slot.id}`)
-    expect(JSON.parse(saved[1].body).reference_asset_id).toBe(reference.id)
-    expect(screen.getByRole('button', { name: '生成一张候选' })).toBeDisabled()
+      position: 0, reference_asset_id: null, output_size: '1024x1536' as const, requirements: '', inputs_ready: false }
+    const http=taskHttp({...task,assets:[asset],slots:[slot]}),fetchMock=vi.fn(http.handle)
+    vi.stubGlobal('fetch',fetchMock);mount(`/workspace/${task.id}`);await screen.findByTestId('task-id')
+    const user=userEvent.setup();await user.upload(screen.getByLabelText('主图参考图片'),new File(['ref'],'ref.png',{type:'image/png'}))
+    await screen.findByText('已上传并绑定到当前图位')
+    const ref=http.saved().assets.find(a=>a.role==='marketing_reference')!
+    expect(http.saved().slots[0].reference_asset_id).toBe(ref.id)
+    expect(screen.queryByLabelText('主图主要营销参考')).not.toBeInTheDocument()
+    expect(screen.getByRole('button',{name:'生成一张候选'})).toBeDisabled()
   })
 })

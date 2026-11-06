@@ -21,6 +21,7 @@ class AssetRole(StrEnum):
 
 class SlotKind(StrEnum):
     MAIN = "main"
+    DIMENSIONS = "dimensions"
     COMPARISON = "comparison"
     SELLING_POINT = "selling_point"
     SCENE = "scene"
@@ -67,9 +68,12 @@ class ImageSlot:
     reference_asset_id: UUID | None = None
     output_size: str = "1024x1536"
     requirements: str = ""
+    archived: bool = False
 
     def configure(self, task: "Task", reference_id: UUID | None,
                   output_size: str, requirements: str) -> "ImageSlot":
+        if self.archived:
+            raise Conflict("已移除图位只保留历史，不能修改配置。")
         if self.task_id != task.id:
             raise InvalidTask("图位不属于当前任务。")
         if output_size not in OUTPUT_SIZES or len(requirements) > 2000:
@@ -127,13 +131,13 @@ class Task:
         return title
 
     def new_slot(self, kind: SlotKind) -> ImageSlot:
-        if kind in {SlotKind.MAIN, SlotKind.COMPARISON} and any(s.kind == kind for s in self.slots):
-            raise Conflict("主图和对比图各最多一个。")
+        if kind in {SlotKind.MAIN, SlotKind.DIMENSIONS, SlotKind.COMPARISON} and any(s.kind == kind for s in self.slots):
+            raise Conflict("主图、尺寸图和对比图各最多一个。")
         return ImageSlot(uuid4(), self.id, kind,
                          max((s.position for s in self.slots), default=-1) + 1)
 
     def slot_inputs_ready(self, slot: ImageSlot) -> bool:
-        return any(a.role == AssetRole.PRODUCT_IMAGE for a in self.assets) and any(
+        return not slot.archived and slot.kind != SlotKind.DIMENSIONS and any(a.role == AssetRole.PRODUCT_IMAGE for a in self.assets) and any(
             a.id == slot.reference_asset_id and a.role == AssetRole.MARKETING_REFERENCE
             for a in self.assets
         )

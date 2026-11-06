@@ -1,168 +1,124 @@
-import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { ApiError, configureSlot, createQuickADraft, createSlot, getTask, uploadAsset } from '../api/tasks'
-import type { OutputSize, SlotKind, TaskDraft } from '../types'
-import { operationId } from '../utils/operationId'
-import { newTaskFiles } from '../utils/newTaskFiles'
-
-const key = 'aigc.pending-task-creation'
-type Role = 'product' | 'reference'
-type Files = Record<Role, File | null>
-type FileInfo = Pick<File, 'name' | 'size' | 'type' | 'lastModified'>
-type Draft = {
-  title: string; overallRequirements: string; operationId: string; kind: SlotKind; size: OutputSize; requirements: string
-  productOp: string; referenceOp: string; slotOp: string; started: boolean
-  taskId: string | null; productId: string | null; referenceId: string | null; slotId: string | null
-  fileInfo: Record<Role, FileInfo | null>
-}
-function restore(): Draft {
-  const fresh: Draft = { title: '', overallRequirements: '', operationId: operationId(), kind: 'main', size: '1024x1536', requirements: '',
-    productOp: operationId(), referenceOp: operationId(), slotOp: operationId(), started: false,
-    taskId: null, productId: null, referenceId: null, slotId: null, fileInfo: { product: null, reference: null } }
-  try {
-    const old = JSON.parse(sessionStorage.getItem(key) || 'null')
-    if (typeof old?.title === 'string' && typeof old?.operationId === 'string') return { ...fresh, ...old }
-  } catch { /* Never auto-submit an unreadable local intent. */ }
-  return fresh
-}
-function remember(draft: Draft | null) {
-  try {
-    if (draft) sessionStorage.setItem(key, JSON.stringify(draft))
-    else sessionStorage.removeItem(key)
-  } catch { /* Memory retains this intent; UI warns before refresh. */ }
-}
-const fileInfo = (file: File | null): FileInfo | null => file && ({ name: file.name, size: file.size, type: file.type, lastModified: file.lastModified })
-
-export function useNewQuickATask() {
-  const [draft, setDraft] = useState(restore)
-  const current = useRef(draft)
-  const [files, setFiles] = useState<Files>({ product: null, reference: null })
-  const selected = useRef(files)
-  const [task, setTask] = useState<TaskDraft | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [hydrating, setHydrating] = useState(true)
-  const [stage, setStage] = useState('')
-  const [error, setError] = useState<{ stage: string; message: string; unknown: boolean; role?: Role } | null>(null)
-  const [cacheWarning, setCacheWarning] = useState('')
-  const active = useRef(true), inFlight = useRef(false)
-  const cacheQueue = useRef(Promise.resolve())
-  const navigate = useNavigate()
-  function checkpoint(patch: Partial<Draft>) {
-    current.current = { ...current.current, ...patch }; remember(current.current)
-    if (active.current) setDraft(current.current)
+import {useEffect,useRef,useState} from 'react'
+import {useNavigate} from 'react-router-dom'
+import {ApiError,configureSlot,createQuickADraft,createSlot,getTask,uploadAsset} from '../api/tasks'
+import type {OutputSize,SlotKind,TaskDraft} from '../types'
+import {operationId} from '../utils/operationId'
+import {newTaskFiles,type CachedFiles} from '../utils/newTaskFiles'
+import {fixedSlot,slotTitle} from '../utils/slotTypes'
+const key='aigc.pending-task-creation'
+type Info=Pick<File,'name'|'size'|'type'|'lastModified'>
+export type DraftSlot={key:string;kind:SlotKind;ordinal:number;active:boolean;size:OutputSize;requirements:string;
+ uploadOp:string;slotOp:string;slotId:string|null;referenceId:string|null;fileInfo:Info|null}
+type Draft={title:string;overallRequirements:string;operationId:string;productOp:string;started:boolean;
+ taskId:string|null;productId:string|null;productInfo:Info|null;slots:DraftSlot[]}
+const info=(f:File|null):Info|null=>f&&({name:f.name,size:f.size,type:f.type,lastModified:f.lastModified})
+function makeSlot(kind:SlotKind,ordinal=1):DraftSlot{return {key:operationId(),kind,ordinal,active:!fixedSlot(kind),size:'1024x1536',requirements:'',
+ uploadOp:operationId(),slotOp:operationId(),slotId:null,referenceId:null,fileInfo:null}}
+function restore():Draft {
+ const fresh:Draft={title:'',overallRequirements:'',operationId:operationId(),productOp:operationId(),started:false,
+ taskId:null,productId:null,productInfo:null,slots:[makeSlot('main'),makeSlot('dimensions'),makeSlot('comparison')]}
+ try {
+  const old=JSON.parse(sessionStorage.getItem(key)||'null')
+  if(typeof old?.title==='string'&&typeof old?.operationId==='string') {
+   if(Array.isArray(old.slots))return {...fresh,...old}
+   // Resume the earlier single-slot intent with its original operation identities.
+   const slot={...makeSlot(old.kind||'main'),key:old.slotOp||fresh.slots[0].key,active:!!old.started||!!old.fileInfo?.reference,
+    size:old.size||'1024x1536',requirements:old.requirements||'',uploadOp:old.referenceOp||operationId(),
+    slotOp:old.slotOp||operationId(),slotId:old.slotId||null,referenceId:old.referenceId||null,fileInfo:old.fileInfo?.reference||null}
+   return {...fresh,...old,productInfo:old.fileInfo?.product||null,slots:[slot,...fresh.slots.filter(s=>s.kind!==slot.kind)]}
   }
-  useEffect(() => {
-    active.current = true
-    const initial = current.current
-    void (async () => {
-      try {
-        const cached = await newTaskFiles(initial.operationId)
-        if (cached && active.current) {
-          const restored: Files = { product: null, reference: null }
-          for (const role of ['product', 'reference'] as const) {
-            if (JSON.stringify(fileInfo(cached[role])) === JSON.stringify(initial.fileInfo[role])) restored[role] = cached[role]
-          }
-          selected.current = restored; setFiles(restored)
-        }
-      } catch { /* Missing files are explicitly shown; server checkpoints are never treated as local files. */ }
-      if (initial.taskId) {
-        try { const saved = await getTask(initial.taskId); if (active.current) setTask(saved) }
-        catch { if (active.current) setCacheWarning('已保存任务暂时无法读取，请重试恢复；不会新建另一任务。') }
-      }
-      if (active.current) setHydrating(false)
-    })()
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (selected.current.product || selected.current.reference || current.current.started) {
-        event.preventDefault(); event.returnValue = ''
-      }
+ }catch{/* Unreadable intents never auto-submit. */}
+ return fresh
+}
+function remember(d:Draft|null){try {d?sessionStorage.setItem(key,JSON.stringify(d)):sessionStorage.removeItem(key)}catch{/* Keep current page state and unload warning. */}}
+export function useNewQuickATask(){
+ const [draft,setDraft]=useState(restore),current=useRef(draft)
+ const [files,setFiles]=useState<CachedFiles>({product:null,reference:null,references:{}}),selected=useRef(files)
+ const [task,setTask]=useState<TaskDraft|null>(null),[busy,setBusy]=useState(false),[hydrating,setHydrating]=useState(true)
+ const [stage,setStage]=useState(''),[warning,setWarning]=useState('')
+ const [error,setError]=useState<{stage:string;message:string;unknown:boolean;target?:string}|null>(null)
+ const active=useRef(true),inFlight=useRef(false),queue=useRef(Promise.resolve());const navigate=useNavigate()
+ function checkpoint(patch:Partial<Draft>){current.current={...current.current,...patch};remember(current.current);if(active.current)setDraft(current.current)}
+ function changeSlot(id:string,patch:Partial<DraftSlot>){checkpoint({slots:current.current.slots.map(s=>s.key===id?{...s,...patch}:s)})}
+ useEffect(()=>{
+  active.current=true;const initial=current.current
+  void(async()=>{
+   try {
+    const cached=await newTaskFiles(initial.operationId)
+    if(cached&&active.current){const references:Record<string,File|null>={}
+     for(const s of initial.slots){const file=cached.references?.[s.key]||(!cached.references?cached.reference:null)
+      if(JSON.stringify(info(file))===JSON.stringify(s.fileInfo))references[s.key]=file}
+     const restored={product:JSON.stringify(info(cached.product))===JSON.stringify(initial.productInfo)?cached.product:null,reference:null,references}
+     selected.current=restored;setFiles(restored)
     }
-    window.addEventListener('beforeunload', beforeUnload)
-    return () => { active.current = false; window.removeEventListener('beforeunload', beforeUnload) }
-  }, [])
-
-  function edit(patch: Partial<Pick<Draft, 'title' | 'overallRequirements' | 'kind' | 'size' | 'requirements'>>) {
-    if (!current.current.started && !inFlight.current) checkpoint(patch)
-  }
-  function canChoose(role: Role) {
-    return !busy && !hydrating && !current.current[role === 'product' ? 'productId' : 'referenceId']
-      && (!current.current.started || !selected.current[role] || (error?.role === role && !error.unknown))
-  }
-  function choose(role: Role, file: File | null) {
-    if (!canChoose(role)) return
-    const replacingRejected = current.current.started && error?.role === role && !error.unknown
-    if (current.current.started && !replacingRejected
-      && JSON.stringify(fileInfo(file)) !== JSON.stringify(current.current.fileInfo[role])) {
-      setCacheWarning('请重新选择同一原始文件以恢复未确认操作；不能用新文件替换结果未知的上传。'); return
-    }
-    selected.current = { ...selected.current, [role]: file }; setFiles(selected.current)
-    checkpoint({ fileInfo: { ...current.current.fileInfo, [role]: fileInfo(file) },
-      ...(replacingRejected ? { [role === 'product' ? 'productOp' : 'referenceOp']: operationId() } : {}) })
-    const pending = { ...selected.current }, id = current.current.operationId
-    cacheQueue.current = cacheQueue.current.then(async () => { await newTaskFiles(id, pending) }).catch(() => {
-      if (active.current) setCacheWarning('本页保留待上传文件；浏览器暂存不可用，刷新后需要重新选择未上传文件。已保存资料不会重复上传。')
-    })
-  }
-
-  async function save() {
-    if (inFlight.current || hydrating) return
-    inFlight.current = true; setBusy(true); setError(null)
-    let step = '检查输入', role: Role | undefined
-    const progress = (value: string) => { step = value; if (active.current) setStage(value) }
-    const publish = (saved: TaskDraft) => { if (active.current) setTask(saved) }
-    try {
-      for (const r of ['product', 'reference'] as const) {
-        if (!current.current[r === 'product' ? 'productId' : 'referenceId'] && !selected.current[r])
-          throw new ApiError(`请选择${r === 'product' ? '实际商品图片' : '营销参考图片'}，文件尚未保存。`, 'rejected')
-      }
-      await cacheQueue.current
-      if (!active.current) return
-      checkpoint({ started: true })
-      progress(current.current.taskId ? '恢复已保存任务' : '创建任务')
-      let saved = current.current.taskId ? await getTask(current.current.taskId)
-        : await createQuickADraft(current.current.title, current.current.operationId, current.current.overallRequirements)
-      checkpoint({ taskId: saved.id }); publish(saved)
-      if (!active.current) return
-      for (const r of ['product', 'reference'] as const) {
-        role = r; progress(r === 'product' ? '保存商品图片' : '保存营销参考')
-        const idKey = r === 'product' ? 'productId' : 'referenceId'
-        const assetRole = r === 'product' ? 'product_image' : 'marketing_reference'
-        if (current.current[idKey]) {
-          if (!saved.assets.some(a => a.id === current.current[idKey] && a.role === assetRole))
-            throw new ApiError('已保存素材身份与服务器不一致，请打开已保存部分核对。', 'unknown')
-        } else {
-          saved = await uploadAsset(saved.id, assetRole, selected.current[r]!, current.current[r === 'product' ? 'productOp' : 'referenceOp'])
-          const assets = saved.assets.filter(a => a.role === assetRole)
-          if (assets.length !== 1) throw new ApiError('本次素材身份无法唯一确认，请打开已保存部分核对。', 'unknown')
-          checkpoint({ [idKey]: assets[0].id }); publish(saved)
-        }
-        if (!active.current) return
-      }
-      role = undefined; progress('创建图位')
-      if (!current.current.slotId) {
-        saved = await createSlot(saved.id, current.current.kind, current.current.slotOp)
-        const slots = saved.slots.filter(s => s.kind === current.current.kind)
-        if (slots.length !== 1) throw new ApiError('本次图位身份无法唯一确认，请核对已保存任务。', 'unknown')
-        checkpoint({ slotId: slots[0].id }); publish(saved)
-      }
-      if (!active.current) return
-      progress('保存图位配置')
-      const slot = saved.slots.find(s => s.id === current.current.slotId)
-      if (!slot) throw new ApiError('服务器未返回本次图位，不能报告完成。', 'unknown')
-      saved = await configureSlot(saved.id, slot, { reference_asset_id: current.current.referenceId,
-        output_size: current.current.size, requirements: current.current.requirements })
-      const ready = saved.slots.find(s => s.id === current.current.slotId)
-      if (saved.overall_requirement?.text !== current.current.overallRequirements
-        || !ready?.inputs_ready || !saved.materials_ready || ready.reference_asset_id !== current.current.referenceId
-        || ready.output_size !== current.current.size || ready.requirements !== current.current.requirements)
-        throw new ApiError('服务器尚未确认资料和图位已完整保存，请核对后重试。', 'unknown')
-      publish(saved); remember(null)
-      await newTaskFiles(current.current.operationId, null).catch(() => undefined)
-      if (active.current) navigate(`/workspace/${saved.id}`)
-    } catch (cause) {
-      if (active.current) setError({ stage: step, role, unknown: !(cause instanceof ApiError) || cause.outcome === 'unknown',
-        message: cause instanceof Error ? cause.message : '保存失败，请核对已保存部分。' })
-      if (step === '创建任务' && cause instanceof ApiError && cause.status === 422) checkpoint({ started: false })
-    } finally { inFlight.current = false; if (active.current) setBusy(false) }
-  }
-  return { draft, files, task, busy, hydrating, stage, error, cacheWarning, edit, choose, canChoose, save }
+   }catch{/* Missing files remain explicitly marked unsaved. */}
+   if(initial.taskId){try{const saved=await getTask(initial.taskId);if(active.current)setTask(saved)}catch{if(active.current)setWarning('已保存任务暂时无法读取；继续保存会恢复同一 Task，不创建另一任务。')}}
+   if(active.current)setHydrating(false)
+  })()
+  const guard=(event:BeforeUnloadEvent)=>{if(selected.current.product||Object.values(selected.current.references||{}).some(Boolean)||current.current.started){event.preventDefault();event.returnValue=''}}
+  window.addEventListener('beforeunload',guard);return()=>{active.current=false;window.removeEventListener('beforeunload',guard)}
+ },[])
+ function edit(patch:Partial<Pick<Draft,'title'|'overallRequirements'>>){if(!current.current.started&&!inFlight.current)checkpoint(patch)}
+ function editSlot(id:string,patch:Partial<Pick<DraftSlot,'size'|'requirements'>>){if(!current.current.started&&!inFlight.current)changeSlot(id,{...patch,active:true})}
+ function addSlot(kind:SlotKind){if(current.current.started||inFlight.current)return;checkpoint({slots:[...current.current.slots,makeSlot(kind,Math.max(0,...current.current.slots.filter(s=>s.kind===kind).map(s=>s.ordinal))+1)]})}
+ function removeSlot(id:string){if(current.current.started||inFlight.current)return;checkpoint({slots:current.current.slots.filter(s=>s.key!==id)});selected.current={...selected.current,references:{...selected.current.references,[id]:null}};setFiles(selected.current);cache()}
+ function cache(){const data={...selected.current,references:{...selected.current.references}},id=current.current.operationId
+  queue.current=queue.current.then(async()=>{await newTaskFiles(id,data)}).catch(()=>{if(active.current)setWarning('本页保留待上传文件；浏览器暂存不可用，刷新后须重新选择未保存的原文件。')})}
+ function canChoose(target:string){const s=current.current.slots.find(s=>s.key===target),saved=target==='product'?current.current.productId:s?.referenceId
+  return !busy&&!hydrating&&!saved&&(!current.current.started||!(target==='product'?selected.current.product:selected.current.references?.[target])||(error?.target===target&&!error.unknown))}
+ function choose(target:string,file:File|null){if(!canChoose(target))return
+  const s=current.current.slots.find(s=>s.key===target),oldInfo=target==='product'?current.current.productInfo:s?.fileInfo
+  const replacing=current.current.started&&error?.target===target&&!error.unknown
+  if(current.current.started&&!replacing&&JSON.stringify(info(file))!==JSON.stringify(oldInfo)){setWarning('请重新选择同一原始文件以恢复未确认的上传。');return}
+  if(target==='product'){selected.current={...selected.current,product:file};checkpoint({productInfo:info(file),...(replacing?{productOp:operationId()}:{})})}
+  else{selected.current={...selected.current,references:{...selected.current.references,[target]:file}};changeSlot(target,{fileInfo:info(file),active:true,...(replacing?{uploadOp:operationId()}:{})})}
+  setFiles(selected.current);cache()
+ }
+ function clearReference(id:string){
+  if(current.current.started||inFlight.current)return
+  const slot=current.current.slots.find(s=>s.key===id)!
+  changeSlot(id,{fileInfo:null,active:!fixedSlot(slot.kind)||!!slot.requirements||slot.size!=='1024x1536'})
+  selected.current={...selected.current,references:{...selected.current.references,[id]:null}}
+  setFiles(selected.current);cache()
+ }
+ async function save(){if(inFlight.current||hydrating)return;inFlight.current=true;setBusy(true);setError(null);let step='检查输入',target:string|undefined
+  const progress=(s:string)=>{step=s;if(active.current)setStage(s)};const publish=(t:TaskDraft)=>{if(active.current)setTask(t)}
+  try{
+   if(!current.current.productId&&!selected.current.product)throw new ApiError('请选择实际商品图片。','rejected')
+   if(!current.current.slots.some(s=>s.active&&(s.referenceId||selected.current.references?.[s.key])))throw new ApiError('请在至少一个图位直接上传对应参考。','rejected')
+   await queue.current;if(!active.current)return;checkpoint({started:true});progress(current.current.taskId?'恢复已保存任务':'创建任务')
+   let saved=current.current.taskId?await getTask(current.current.taskId):await createQuickADraft(current.current.title,current.current.operationId,current.current.overallRequirements)
+   checkpoint({taskId:saved.id});publish(saved);if(!active.current)return
+   target='product';progress('保存商品图片')
+   if(!current.current.productId){const uploaded=await uploadAsset(saved.id,'product_image',selected.current.product!,current.current.productOp);saved=uploaded
+    if(!uploaded.uploaded_asset_id||!saved.assets.some(a=>a.id===uploaded.uploaded_asset_id&&a.role==='product_image'))throw new ApiError('服务器未明确返回本次商品素材身份。','unknown')
+    checkpoint({productId:uploaded.uploaded_asset_id});publish(saved)}
+   else if(!saved.assets.some(a=>a.id===current.current.productId&&a.role==='product_image'))throw new ApiError('已保存商品身份与服务器不一致。','unknown')
+   if(!active.current)return
+   for(const item of current.current.slots.filter(s=>s.active)){
+    target=item.key;let slot=current.current.slots.find(s=>s.key===item.key)!;const label=slotTitle(slot.kind,slot.ordinal)
+    progress(`${label}：创建图位`)
+    if(!slot.slotId){const created=await createSlot(saved.id,slot.kind,slot.slotOp);saved=created
+     if(!created.created_slot_id||!saved.slots.some(s=>s.id===created.created_slot_id&&s.kind===slot.kind))throw new ApiError('服务器未明确返回本次图位身份。','unknown')
+     changeSlot(slot.key,{slotId:created.created_slot_id});publish(saved);slot=current.current.slots.find(s=>s.key===slot.key)!}
+    if(!active.current)return
+    const file=selected.current.references?.[slot.key]
+    if(!slot.referenceId&&file){progress(`${label}：保存参考图片`);const uploaded=await uploadAsset(saved.id,'marketing_reference',file,slot.uploadOp);saved=uploaded
+     if(!uploaded.uploaded_asset_id||!saved.assets.some(a=>a.id===uploaded.uploaded_asset_id&&a.role==='marketing_reference'))throw new ApiError('服务器未明确返回本次参考素材身份。','unknown')
+     changeSlot(slot.key,{referenceId:uploaded.uploaded_asset_id});publish(saved);slot=current.current.slots.find(s=>s.key===slot.key)!}
+    if(!active.current)return
+    progress(`${label}：自动绑定与保存配置`);const persisted=saved.slots.find(s=>s.id===slot.slotId)
+    if(!persisted||slot.referenceId&&!saved.assets.some(a=>a.id===slot.referenceId&&a.role==='marketing_reference'))throw new ApiError('已保存图位或参考身份不一致。','unknown')
+    saved=await configureSlot(saved.id,persisted,{reference_asset_id:slot.referenceId,output_size:slot.size,requirements:slot.requirements})
+    const bound=saved.slots.find(s=>s.id===slot.slotId)
+    if(!bound||bound.reference_asset_id!==slot.referenceId||bound.output_size!==slot.size||bound.requirements!==slot.requirements)throw new ApiError('服务器尚未确认本图位绑定及配置。','unknown')
+    publish(saved);if(!active.current)return
+   }
+   if(saved.overall_requirement?.text!==current.current.overallRequirements)throw new ApiError('服务器整体要求与本次输入不一致，请核对。','unknown')
+   remember(null);await newTaskFiles(current.current.operationId,null).catch(()=>undefined);if(active.current)navigate(`/workspace/${saved.id}`)
+  }catch(cause){if(active.current)setError({stage:step,target,message:cause instanceof Error?cause.message:'保存失败',unknown:!(cause instanceof ApiError)||cause.outcome==='unknown'})
+   if(step==='创建任务'&&cause instanceof ApiError&&cause.status===422)checkpoint({started:false})
+  }finally{inFlight.current=false;if(active.current)setBusy(false)}
+ }
+ return {draft,files,task,busy,hydrating,stage,error,cacheWarning:warning,edit,editSlot,addSlot,removeSlot,choose,canChoose,clearReference,save}
 }

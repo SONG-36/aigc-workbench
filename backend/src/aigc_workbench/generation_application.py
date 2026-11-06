@@ -79,6 +79,9 @@ class GenerationApplication:
         return task, slot
 
     def _select(self, task_id, slot_id):
+        _, slot = self._slot(task_id, slot_id)
+        if slot.archived or slot.kind.value == 'dimensions':
+            raise C01Error('SLOT_NOT_EXECUTABLE', 'BUSINESS_ROUTING', '已移除图位不执行；尺寸图仅保存专用已标注真实尺寸白底素材，专项确认流程未实现，不能生成或推断物理尺寸。')
         state, images = current_sources(self._service().service, task_id, slot_id)
         try:
             flight = self._select_existing(task_id, slot_id)
@@ -217,7 +220,7 @@ class GenerationApplication:
                      "model": MODEL, "parameters": PARAMETERS, "max_cost_usd": None if self.settings.environment == "pilot" else "1.00", "estimate_usd": None,
                      "decision_snapshot_id": None, "product_asset_id": None,
                      "reference_asset_id": str(slot.reference_asset_id) if slot.reference_asset_id else None}
-        if self.enabled and self.dispatcher.pool and not self.access_error:
+        if self.enabled and self.dispatcher.pool and not self.access_error and not slot.archived:
             try:
                 preflight = self._select(task_id, slot_id)
                 if preflight.get('kind') == 'QUICK_A_CREATION':
@@ -243,7 +246,7 @@ class GenerationApplication:
                 'execution_mode': 'TEST_SUBSTITUTE' if self.transport is not None else 'REAL',
                 'reviews': reviews, 'delivery': ({**delivery,
                     'url': f'/api/tasks/{task_id}/slots/{slot_id}/delivery?review_id={delivery["id"]}'} if delivery else None),
-                'can_request_revision': bool(self.enabled and self.dispatcher.pool and not self.access_error and candidates
+                'can_request_revision': bool(self.enabled and self.dispatcher.pool and not self.access_error and not slot.archived and candidates
                     and not active and os.environ.get('AIGC_ENABLE_C07_REAL') == '1'
                     and not any(e['error'] and e['error'].get('code') == 'CANDIDATE_NOT_SAVED' for e in executions)),
                 'candidates': candidates, 'executions': executions,
@@ -325,7 +328,9 @@ class GenerationApplication:
         return {"operation_id": receipt["operation_id"], "state": receipt["state"]}
 
     def review(self, task_id, slot_id, version_id, operation_id, decision, reviewer, feedback, expected_current_review_id):
-        self._slot(task_id, slot_id)
+        _, slot = self._slot(task_id, slot_id)
+        if slot.archived:
+            raise Conflict("已移除图位保留历史审核与交付，不新增审核。")
         return self.reviews.submit(task_id, slot_id, version_id, operation_id, decision, reviewer, feedback, expected_current_review_id)
 
     def delivery(self, task_id, slot_id, review_id):

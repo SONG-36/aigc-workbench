@@ -198,7 +198,7 @@ def asset_from_row(row: sqlite3.Row) -> Asset:
 def slot_from_row(row: sqlite3.Row) -> ImageSlot:
     return ImageSlot(UUID(row["id"]), UUID(row["task_id"]), SlotKind(row["kind"]), row["position"],
                      UUID(row["reference_asset_id"]) if row["reference_asset_id"] else None,
-                     row["output_size"], row["requirements"])
+                     row["output_size"], row["requirements"], bool(row["archived"]))
 
 
 def load_task(connection: sqlite3.Connection, task_id: UUID) -> Task | None:
@@ -224,10 +224,12 @@ class SQLiteTaskStore:
         """Only this explicit startup entry may create a database."""
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(self.database_path, timeout=5)) as connection, connection:
-            connection.execute("PRAGMA foreign_keys = ON")
+            # SQLite requires this before the transaction for a CHECK-preserving table migration.
+            # The write transaction and foreign_key_check below protect all existing relations.
+            connection.execute("PRAGMA foreign_keys = OFF")
             connection.execute("BEGIN IMMEDIATE")
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}:
+            if version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}:
                 raise RuntimeError(f"Unsupported database schema version: {version}")
             if version == 0:
                 connection.execute(V1_TASKS)
@@ -270,8 +272,29 @@ class SQLiteTaskStore:
                 for statement in V9_TABLES:
                     connection.execute(statement)
                 connection.execute("PRAGMA user_version = 9")
+                version = 9
+            if version == 9:
+                self._upgrade_v10(connection)
+                connection.execute("PRAGMA user_version = 10")
             if connection.execute("PRAGMA foreign_key_check").fetchone():
                 raise RuntimeError("Database foreign-key validation failed")
+
+    def _upgrade_v10(self, connection: sqlite3.Connection) -> None:
+        # Rebuild only this table's CHECK. UUIDs, positions, references and child FK names stay unchanged.
+        definition = V2_TABLES[2].replace("CREATE TABLE image_slots (", "CREATE TABLE image_slots_next (")
+        definition = definition.replace("'main','comparison','selling_point','scene'", "'main','dimensions','comparison','selling_point','scene'")
+        definition = definition.replace("requirements TEXT NOT NULL,", "requirements TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),")
+        connection.execute(definition)
+        fields = 'id,task_id,operation_id,kind,position,reference_asset_id,output_size,requirements'
+        old_columns = {r[1] for r in connection.execute('PRAGMA table_info(image_slots)')}
+        archived = 'archived' if 'archived' in old_columns else '0'
+        connection.execute(f'INSERT INTO image_slots_next ({fields},archived) SELECT {fields},{archived} FROM image_slots')
+        connection.execute('DROP TABLE image_slots')
+        connection.execute('ALTER TABLE image_slots_next RENAME TO image_slots')
+        connection.execute(V2_TABLES[3].replace("'main', 'comparison'", "'main', 'dimensions', 'comparison'"))
+        connection.execute("""CREATE TABLE IF NOT EXISTS slot_removals (
+            task_id TEXT NOT NULL REFERENCES task_drafts(id), slot_id TEXT NOT NULL UNIQUE REFERENCES image_slots(id),
+            operation_id TEXT NOT NULL, removed_at TEXT NOT NULL, PRIMARY KEY(task_id,operation_id))""")
 
     def _upgrade_v1(self, connection: sqlite3.Connection) -> None:
         # Additive migration: existing task rows are never recreated or assigned new IDs.
@@ -386,3 +409,18 @@ class SQLiteChanges:
         self.connection.execute("INSERT INTO task_requirements VALUES (?,?,?,?,?,?)",
             (str(requirement.id), str(requirement.task_id), requirement.version, requirement.text,
              requirement.saved_at.isoformat(), str(operation_id)))
+
+
+    def slot_removal(self, task_id: UUID, operation_id: UUID):
+        row = self.connection.execute('SELECT slot_id FROM slot_removals WHERE task_id=? AND operation_id=?',
+                                      (str(task_id),str(operation_id))).fetchone()
+        return UUID(row[0]) if row else None
+
+    def archive_slot(self, task_id: UUID, slot_id: UUID, operation_id: UUID, removed_at: str):
+        self.connection.execute('UPDATE image_slots SET archived=1 WHERE id=? AND task_id=?', (str(slot_id),str(task_id)))
+        self.connection.execute('INSERT INTO slot_removals VALUES (?,?,?,?)', (str(task_id),str(slot_id),str(operation_id),removed_at))
+
+
+    def slot_has_active_execution(self, task_id: UUID, slot_id: UUID) -> bool:
+        return self.connection.execute("SELECT 1 FROM c06_dispatches WHERE task_id=? AND slot_id=? AND state IN ('QUEUED','RUNNING','OUTCOME_UNKNOWN') LIMIT 1",
+                                       (str(task_id),str(slot_id))).fetchone() is not None
