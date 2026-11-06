@@ -163,6 +163,8 @@ def test_v5_migration_rolls_back_and_preserves_candidate_and_evidence(generation
     import aigc_workbench.persistence as persistence
     candidate=run(generation,SyntheticWire())['candidate'];database=generation[0].store.database
     with database.connection(write=True) as db:
+        db.execute('DROP TABLE task_requirements')
+        db.execute('ALTER TABLE task_creations DROP COLUMN initial_overall_requirement')
         db.execute('DROP TABLE slot_deliveries')
         db.execute('DROP TABLE image_reviews')
         db.execute('DROP TABLE c06_dispatches');db.execute('PRAGMA user_version=5')

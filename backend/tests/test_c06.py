@@ -159,6 +159,8 @@ def test_v4_upgrade_rolls_back_on_error_and_preserves_existing_records(generatio
     service,_,_,_=generation
     database=service.store.database
     with database.connection(write=True) as db:
+        db.execute('DROP TABLE task_requirements')
+        db.execute('ALTER TABLE task_creations DROP COLUMN initial_overall_requirement')
         db.execute('DROP TABLE slot_deliveries')
         db.execute('DROP TABLE image_reviews')
         db.execute('DROP TABLE image_versions')
@@ -175,5 +177,5 @@ def test_v4_upgrade_rolls_back_on_error_and_preserves_existing_records(generatio
     monkeypatch.setattr(persistence,'V5_TABLES',original)
     database.initialize()
     with database.connection() as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0]==8
+        assert db.execute('PRAGMA user_version').fetchone()[0]==9
         for name,rows in before.items(): assert [tuple(row) for row in db.execute('SELECT * FROM '+name)]==rows

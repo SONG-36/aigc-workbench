@@ -337,6 +337,8 @@ def test_v3_to_v4_migration_preserves_s02_and_rolls_back(experiment, monkeypatch
     before = all_original_rows(real)
     dbpath = real.settings.database_path
     with sqlite3.connect(dbpath) as db:
+        db.execute('DROP TABLE task_requirements')
+        db.execute('ALTER TABLE task_creations DROP COLUMN initial_overall_requirement')
         db.execute("DROP TRIGGER c01_model_runs_terminal")
         db.execute("DROP TRIGGER c01_model_runs_retain")
         db.execute('DROP TABLE slot_deliveries')
@@ -351,7 +353,8 @@ def test_v3_to_v4_migration_preserves_s02_and_rolls_back(experiment, monkeypatch
     with sqlite3.connect(dbpath) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 3
         assert db.execute("SELECT count(*) FROM sqlite_master WHERE name='c01_model_runs'").fetchone()[0] == 0
-    assert all_original_rows(real) == before
+    expected_v3 = {**before, "task_creations": [{k:v for k,v in r.items() if k != "initial_overall_requirement"} for r in before["task_creations"]]}
+    assert all_original_rows(real) == expected_v3
     monkeypatch.setattr(persistence, "V4_TABLES", original)
     real.store.database.initialize()
     assert all_original_rows(real) == before

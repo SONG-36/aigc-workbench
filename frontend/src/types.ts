@@ -29,9 +29,15 @@ export interface ImageSlot {
   inputs_ready: boolean
 }
 
+export interface OverallRequirement {
+  id: string | null; task_id: string; version: number; text: string
+  scope: 'TASK_ALL_SLOTS'; saved_at: string | null; source: string
+}
+
 export interface TaskDraft {
   id: string
   title: string
+  overall_requirement?: OverallRequirement
   mode: 'quick_a'
   status: 'draft'
   can_generate: false

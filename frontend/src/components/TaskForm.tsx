@@ -56,6 +56,10 @@ export function TaskForm() {
       <label>本图补充制作要求<textarea aria-label="新建图位要求" rows={3} maxLength={2000} value={draft.requirements}
         onChange={e => form.edit({ requirements: e.target.value })} /></label>
     </fieldset>
+    <label>整体运营要求（可选）<textarea aria-label="整体运营要求" rows={3} maxLength={2000}
+      value={draft.overallRequirements} disabled={busy || draft.started}
+      onChange={e => form.edit({overallRequirements: e.target.value})} /></label>
+    <p className="muted">作用于本任务全部图位的后续生成和显式修改，与逐图要求共同生效；不自动重做或使已有 Pass 失效。</p>
     <p className="muted">一次保存任务、两份原始素材及图位配置，随后进入工作台；保存不会调用模型。</p>
     {form.cacheWarning && <p className="notice">{form.cacheWarning}</p>}
     {busy && <p role="status">{form.stage}…</p>}

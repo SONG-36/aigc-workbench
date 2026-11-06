@@ -151,7 +151,7 @@ def test_scope_stale_constraints_and_operation_conflicts_stop_before_payment(rev
         q = quote(client, path, v1)
         generation[0].service.tasks.configure_slot(UUID(v1['task_id']), UUID(v1['slot_id']),
             generation[3]['assets'][1].id, '1024x1536', 'CHANGED_EFFECTIVE_REQUIREMENT')
-        assert revise(client, path, q).status_code == 503
+        assert revise(client, path, q).status_code == 409
         assert wire.calls == 0
 
 
@@ -176,6 +176,8 @@ def test_v7_additive_migration_rollback_and_no_existing_record_changes(revision,
     import aigc_workbench.persistence as persistence
     _, service, _ = revision; database = service.store.database
     with database.connection(write=True) as db:
+        db.execute('DROP TABLE task_requirements')
+        db.execute('ALTER TABLE task_creations DROP COLUMN initial_overall_requirement')
         db.execute('DROP TABLE slot_deliveries'); db.execute('DROP TABLE image_reviews'); db.execute('ALTER TABLE c06_dispatches DROP COLUMN progress_json'); db.execute('PRAGMA user_version=6')
         tables = ['task_drafts','assets','image_slots','c01_snapshots','c01_model_runs','image_versions','c06_dispatches']
         before = {t: [tuple(r) for r in db.execute('SELECT * FROM ' + t)] for t in tables}

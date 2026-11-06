@@ -38,6 +38,15 @@ def contract(context):
         elif isinstance(node, list):
             for child in node: exclude_missing_reviews(child)
     exclude_missing_reviews(schema)
+    if 'effective_requirements' in context:
+        def add_requirement_source(node):
+            if isinstance(node, dict):
+                if 'enum' in node and 'SLOT_REQUIREMENTS' in node['enum']:
+                    node['enum'].append('OVERALL_REQUIREMENTS')
+                for child in node.values(): add_requirement_source(child)
+            elif isinstance(node, list):
+                for child in node: add_requirement_source(child)
+        add_requirement_source(schema)
     decision = schema['properties']['02_IMAGE_CREATION_DECISION']['properties']
     ids = [c['id'] for c in context['upstream_results'][1]['result']['marketing_claims']]
     if len(ids) != len(set(ids)):
@@ -50,7 +59,12 @@ def contract(context):
 
 def compose(context, snapshot_id):
     schema = contract(context)
-    contents = [INSTRUCTION, BOUNDARIES, canonical(context),
+    boundaries = BOUNDARIES
+    if 'effective_requirements' in context:
+        boundaries += ('整体要求与逐图要求共同约束本图位，逐项保留来源、作用范围和版本；不得默默丢弃。'
+                       '将适用要求落实到C04/C05及C06指令；整体要求不是商品事实，不能改变真实商品依据。'
+                       '要求冲突按effective_requirements.conflict_policy限定影响范围，不擅自最后输入优先。')
+    contents = [INSTRUCTION, boundaries, canonical(context),
                 '中文说明，参考文案按实际需要保留原文。完整分段JSON；每个实际claim id恰好一次。'
                 'C06_creation_input须写清两图权限、图位主题、构图、文字与图形关系、商品及附件保护和禁止事项。\n' + canonical(schema)]
     layers = [{'index': i + 1, 'name': name, 'version': VERSION, 'content': value,

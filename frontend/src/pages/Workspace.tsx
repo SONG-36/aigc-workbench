@@ -7,6 +7,7 @@ import { AssetUploader } from '../components/AssetUploader'
 import { SlotPanel } from '../components/SlotPanel'
 import { WriteFeedback } from '../components/WriteFeedback'
 import { useWriteAction } from '../hooks/useWriteAction'
+import { OverallRequirements } from '../components/OverallRequirements'
 import { GenerationWorkspace } from '../components/GenerationWorkspace'
 import type { TaskDraft } from '../types'
 
@@ -14,6 +15,7 @@ function SavedWorkspace({ initial }: { initial: TaskDraft }) {
   const [task, setTask] = useState(initial)
   // Serializes writes within this workspace; late snapshots cannot overwrite newer writes.
   const write = useWriteAction()
+  const [overallDirty, setOverallDirty] = useState(false)
   const [unsavedSlots, setUnsavedSlots] = useState<Set<string>>(new Set())
   const onDirty = useCallback((slotId: string, dirty: boolean) => setUnsavedSlots(previous => {
     if (previous.has(slotId) === dirty) return previous
@@ -21,13 +23,14 @@ function SavedWorkspace({ initial }: { initial: TaskDraft }) {
     if (dirty) next.add(slotId); else next.delete(slotId)
     return next
   }), [])
-  return <WorkspaceShell task={task} output={<GenerationWorkspace task={task} locked={write.locked} unsavedSlots={unsavedSlots} />}>
+  return <WorkspaceShell task={task} output={<GenerationWorkspace task={task} locked={write.locked || overallDirty} unsavedSlots={unsavedSlots} />}>
     <WriteFeedback write={write} />
     <div className="asset-columns">
       <AssetUploader task={task} role="product_image" write={write} onSaved={setTask} />
       <AssetUploader task={task} role="marketing_reference" write={write} onSaved={setTask} />
     </div>
     <SlotPanel task={task} write={write} onSaved={setTask} onDirty={onDirty} />
+    <OverallRequirements task={task} write={write} onSaved={setTask} onDirty={setOverallDirty} />
   </WorkspaceShell>
 }
 

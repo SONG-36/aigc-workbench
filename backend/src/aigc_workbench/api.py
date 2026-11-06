@@ -21,6 +21,14 @@ class CreateTaskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(strict=True)
     operation_id: UUID
+    overall_requirements: str = Field(default="", strict=True, max_length=2000)
+
+
+class SaveOverallRequirementRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(strict=True, max_length=2000)
+    expected_version: int = Field(strict=True, ge=0)
+    operation_id: UUID
 
 
 class CreateSlotRequest(BaseModel):
@@ -78,6 +86,7 @@ class TaskResponse(BaseModel):
     materials_ready: bool
     readiness_reason: str
     created_at: datetime
+    overall_requirement: dict
     assets: list[AssetResponse]
     slots: list[SlotResponse]
 
@@ -87,6 +96,9 @@ class TaskResponse(BaseModel):
             id=task.id, title=task.title, mode=task.mode, status=task.status,
             can_generate=task.can_generate, materials_ready=task.materials_ready,
             readiness_reason=task.readiness_reason, created_at=task.created_at,
+            overall_requirement=(task.overall_requirement.projection() if task.overall_requirement else {
+                "id": None, "task_id": str(task.id), "version": 0, "text": "", "scope": "TASK_ALL_SLOTS", "saved_at": None,
+                "source": "NOT_PROVIDED"}),
             assets=[AssetResponse.from_asset(a) for a in task.assets],
             slots=[SlotResponse(id=s.id, task_id=s.task_id, kind=s.kind, position=s.position,
                                 reference_asset_id=s.reference_asset_id, output_size=s.output_size,
@@ -189,7 +201,7 @@ def health() -> dict[str, str]:
 
 @router.post("/tasks", response_model=TaskResponse, status_code=201)
 def create_task(body: CreateTaskRequest, service: Service) -> TaskResponse:
-    return TaskResponse.from_task(service.create_draft(body.title, body.operation_id))
+    return TaskResponse.from_task(service.create_draft(body.title, body.operation_id, body.overall_requirements))
 
 
 @router.get("/tasks", response_model=list[TaskResponse])
@@ -200,6 +212,11 @@ def list_tasks(service: Service) -> list[TaskResponse]:
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
 def get_task(task_id: UUID, service: Service) -> TaskResponse:
     return TaskResponse.from_task(service.get_draft(task_id))
+
+
+@router.put("/tasks/{task_id}/overall-requirement", response_model=TaskResponse)
+def save_overall_requirement(task_id: UUID, body: SaveOverallRequirementRequest, service: Service):
+    return TaskResponse.from_task(service.save_overall_requirement(task_id, body.text, body.expected_version, body.operation_id))
 
 
 @router.post("/tasks/{task_id}/assets", response_model=TaskResponse, status_code=201)

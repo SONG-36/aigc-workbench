@@ -50,7 +50,7 @@ def test_create_query_list_and_new_app_restore_same_record(settings):
     with TestClient(create_app(settings), base_url="http://localhost") as restarted:
         assert restarted.get(f"/api/tasks/{saved['id']}").json() == saved
     with sqlite3.connect(settings.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
         assert connection.execute("SELECT count(*) FROM task_drafts").fetchone()[0] == 1
 
 
@@ -100,7 +100,7 @@ def test_sql_parameter_binding_keeps_title_as_data(client):
 
 
 def test_storage_failure_is_not_reported_as_success(client, monkeypatch):
-    def fail(self, task, operation_id):
+    def fail(self, task, operation_id, overall_requirement=""):
         raise sqlite3.OperationalError("test storage failure")
     from aigc_workbench.persistence import SQLiteChanges
     monkeypatch.setattr(SQLiteChanges, "add_task", fail)

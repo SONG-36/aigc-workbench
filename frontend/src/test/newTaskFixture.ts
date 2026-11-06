@@ -19,7 +19,13 @@ export async function chooseImages(user = userEvent.setup()) {
 export function taskHttp(initial: TaskDraft) {
   let saved = structuredClone(initial)
   const assetOps = new Map<string, string>()
+  const requirementOps = new Set<string>()
   const handle = async (path: string, options?: RequestInit): Promise<Response> => {
+    if (path === '/api/tasks' && options?.method === 'POST') {
+      const body = JSON.parse(options.body as string)
+      if (body.overall_requirements) saved.overall_requirement = {id: crypto.randomUUID(), task_id: saved.id, version: 1,
+        text: body.overall_requirements, scope: 'TASK_ALL_SLOTS', saved_at: saved.created_at, source: 'EXPLICIT_OPERATOR_REQUIREMENT'}
+    }
     if (path.endsWith('/workspace')) return json({task_id: saved.id, slot_id: saved.slots[0].id,
       state: 'NOT_STARTED', candidates: [], executions: [], readiness: {can_generate: false, reason: 'TEST_ONLY'}})
     if (path.includes('/assets?')) {
@@ -36,6 +42,14 @@ export function taskHttp(initial: TaskDraft) {
       const body = JSON.parse(options.body as string)
       saved.slots = [{id: crypto.randomUUID(), task_id: saved.id, kind: body.kind, position: 0,
         reference_asset_id: null, output_size: '1024x1536', requirements: '', inputs_ready: false}]
+    } else if (options?.method === 'PUT' && path.endsWith('/overall-requirement')) {
+      const body = JSON.parse(options.body as string)
+      if (!requirementOps.has(body.operation_id)) {
+        if (body.expected_version !== (saved.overall_requirement?.version || 0)) return json({error:{message:'要求版本已变化'}},409)
+        requirementOps.add(body.operation_id)
+        saved.overall_requirement = {id:crypto.randomUUID(),task_id:saved.id,text:body.text,scope:'TASK_ALL_SLOTS',
+          version:body.expected_version+1,saved_at:saved.created_at,source:'EXPLICIT_OPERATOR_REQUIREMENT'}
+      }
     } else if (options?.method === 'PUT') {
       saved.slots[0] = {...saved.slots[0], ...JSON.parse(options.body as string), inputs_ready: true}
       saved.materials_ready = true

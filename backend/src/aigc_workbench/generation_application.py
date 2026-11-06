@@ -312,7 +312,12 @@ class GenerationApplication:
         snapshot = self._revision_service().service.evidence.load_snapshot(snapshot_id)
         if snapshot["task_id"] != str(task_id) or snapshot["slot_id"] != str(slot_id) or snapshot["capability"] != "C07":
             raise Conflict("修改快照不属于当前图位或操作。")
-        preflight = self._revision_service().preflight(snapshot_id, MODEL)
+        try:
+            preflight = self._revision_service().preflight(snapshot_id, MODEL)
+        except C01Error as exc:
+            if exc.code == 'REVISION_SOURCE_CHANGED':
+                raise Conflict(str(exc)) from None  # Known pre-dispatch conflict, not an unknown paid outcome.
+            raise
         if self._quote(preflight) != quote_token or max_cost_usd != self.budget_policy:
             raise Conflict("修改内容或来源已变化；请重新核对。")
         authorize(self.settings, True, max_cost_usd, preflight["cost"])

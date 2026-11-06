@@ -6,7 +6,7 @@ from pathlib import Path
 import sqlite3
 from uuid import UUID
 
-from .domain import Asset, AssetRole, ImageMetadata, ImageSlot, SlotKind, Task
+from .domain import OverallRequirement, Asset, AssetRole, ImageMetadata, ImageSlot, SlotKind, Task
 
 
 V1_TASKS = """CREATE TABLE task_drafts (
@@ -170,6 +170,25 @@ for _action in ("INSERT", "UPDATE"):
 V8_TABLES = ["ALTER TABLE c06_dispatches ADD COLUMN progress_json TEXT NOT NULL DEFAULT '{}'"]
 
 
+V9_TABLES = (
+    "ALTER TABLE task_creations ADD COLUMN initial_overall_requirement TEXT NOT NULL DEFAULT ''",
+    """CREATE TABLE task_requirements (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES task_drafts(id),
+        version INTEGER NOT NULL CHECK(version > 0), text TEXT NOT NULL CHECK(length(text) <= 2000),
+        saved_at TEXT NOT NULL, operation_id TEXT NOT NULL,
+        UNIQUE(task_id,version), UNIQUE(task_id,operation_id))""",
+    """CREATE TRIGGER task_requirements_immutable_update BEFORE UPDATE ON task_requirements
+       BEGIN SELECT RAISE(ABORT, 'retain requirement revisions'); END""",
+    """CREATE TRIGGER task_requirements_immutable_delete BEFORE DELETE ON task_requirements
+       BEGIN SELECT RAISE(ABORT, 'retain requirement revisions'); END""",
+)
+
+
+def requirement_from_row(row):
+    return OverallRequirement(UUID(row["id"]), UUID(row["task_id"]), row["version"], row["text"],
+                              datetime.fromisoformat(row["saved_at"]))
+
+
 def asset_from_row(row: sqlite3.Row) -> Asset:
     return Asset(UUID(row["id"]), UUID(row["task_id"]), AssetRole(row["role"]), row["filename"],
                  ImageMetadata(row["sha256"], row["size_bytes"], row["media_type"],
@@ -190,9 +209,11 @@ def load_task(connection: sqlite3.Connection, task_id: UUID) -> Task | None:
                                 (str(task_id),)).fetchall()
     slots = connection.execute("SELECT * FROM image_slots WHERE task_id = ? ORDER BY position",
                                (str(task_id),)).fetchall()
+    requirement = connection.execute("SELECT * FROM task_requirements WHERE task_id=? ORDER BY version DESC LIMIT 1",
+                                     (str(task_id),)).fetchone()
     return Task(UUID(row["id"]), row["title"], datetime.fromisoformat(row["created_at"]),
                 row["mode"], row["status"], tuple(map(asset_from_row, assets)),
-                tuple(map(slot_from_row, slots)))
+                tuple(map(slot_from_row, slots)), requirement_from_row(requirement) if requirement else None)
 
 
 class SQLiteTaskStore:
@@ -206,7 +227,7 @@ class SQLiteTaskStore:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("BEGIN IMMEDIATE")
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, 1, 2, 3, 4, 5, 6, 7, 8}:
+            if version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}:
                 raise RuntimeError(f"Unsupported database schema version: {version}")
             if version == 0:
                 connection.execute(V1_TASKS)
@@ -244,6 +265,11 @@ class SQLiteTaskStore:
                 for statement in V8_TABLES:
                     connection.execute(statement)
                 connection.execute("PRAGMA user_version = 8")
+                version = 8
+            if version == 8:
+                for statement in V9_TABLES:
+                    connection.execute(statement)
+                connection.execute("PRAGMA user_version = 9")
             if connection.execute("PRAGMA foreign_key_check").fetchone():
                 raise RuntimeError("Database foreign-key validation failed")
 
@@ -303,12 +329,12 @@ class SQLiteChanges:
                                       (str(operation_id),)).fetchone()
         return self.get_task(UUID(row[0])) if row else None
 
-    def add_task(self, task: Task, operation_id: UUID) -> None:
+    def add_task(self, task: Task, operation_id: UUID, overall_requirement: str = "") -> None:
         self.connection.execute(
             "INSERT INTO task_drafts (id,title,mode,status,created_at) VALUES (?,?,?,?,?)",
             (str(task.id), task.title, task.mode, task.status, task.created_at.isoformat()))
-        self.connection.execute("INSERT INTO task_creations (operation_id,task_id) VALUES (?,?)",
-                                (str(operation_id), str(task.id)))
+        self.connection.execute("INSERT INTO task_creations (operation_id,task_id,initial_overall_requirement) VALUES (?,?,?)",
+                                (str(operation_id), str(task.id), overall_requirement))
 
     def asset_upload(self, task_id: UUID, operation_id: UUID) -> Asset | None:
         row = self.connection.execute("SELECT * FROM assets WHERE task_id = ? AND operation_id = ?",
@@ -345,3 +371,18 @@ class SQLiteChanges:
                WHERE id = ? AND task_id = ?""",
             (str(slot.reference_asset_id) if slot.reference_asset_id else None,
              slot.output_size, slot.requirements, str(slot.id), str(slot.task_id)))
+
+
+    def creation_requirement(self, operation_id: UUID) -> str:
+        return self.connection.execute("SELECT initial_overall_requirement FROM task_creations WHERE operation_id=?",
+                                       (str(operation_id),)).fetchone()[0]
+
+    def requirement_operation(self, task_id: UUID, operation_id: UUID):
+        row = self.connection.execute("SELECT * FROM task_requirements WHERE task_id=? AND operation_id=?",
+                                      (str(task_id), str(operation_id))).fetchone()
+        return requirement_from_row(row) if row else None
+
+    def add_requirement(self, requirement: OverallRequirement, operation_id: UUID):
+        self.connection.execute("INSERT INTO task_requirements VALUES (?,?,?,?,?,?)",
+            (str(requirement.id), str(requirement.task_id), requirement.version, requirement.text,
+             requirement.saved_at.isoformat(), str(operation_id)))

@@ -24,10 +24,13 @@ it('saves two sources and a configured slot once, then restores server state wit
   await user.type(screen.getByLabelText('任务名称'), task.title); await chooseImages(user)
   await user.selectOptions(screen.getByLabelText('新建输出尺寸'), '1536x1536')
   await user.type(screen.getByLabelText('新建图位要求'), '保留商品附件')
+  await user.type(screen.getByLabelText('整体运营要求'), 'GLOBAL_FORM_REQUIREMENT')
   expect(fetchMock).not.toHaveBeenCalled()
   await user.click(screen.getByRole('button', {name: '保存任务和资料，进入工作台'}))
   await screen.findByTestId('task-id')
   expect(http.saved().assets.map(a => a.role)).toEqual(['product_image', 'marketing_reference'])
+  expect(http.saved().overall_requirement).toMatchObject({text:'GLOBAL_FORM_REQUIREMENT',version:1,scope:'TASK_ALL_SLOTS'})
+  expect(screen.getByLabelText('整体运营要求')).toHaveValue('GLOBAL_FORM_REQUIREMENT')
   expect(http.saved().slots[0]).toMatchObject({reference_asset_id: http.saved().assets[1].id,
     output_size: '1536x1536', requirements: '保留商品附件', inputs_ready: true})
   expect(screen.getByLabelText('输出尺寸')).toHaveValue('1536x1536')

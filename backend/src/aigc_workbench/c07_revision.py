@@ -39,6 +39,10 @@ def compose(context):
         output = OUTPUT.replace("1024x1536", plan["model_generation_size"])
         if plan["postprocess"] != "NONE":
             output += f"原生方图随后以LANCZOS等比例放大交付至{plan['final_output_size']}；不裁切、不新增商品物理尺寸。"
+    if "effective_requirements" in context["effective_constraints"]:
+        boundaries += ("当前整体与逐图要求按保存范围及版本共同约束本次修改。历史AI方案不是运营批准；"
+                       "已被当前要求取代的历史设计性限制不再并列执行，商品真实性约束仍受保护。"
+                       "有实质冲突时按effective_requirements.conflict_policy限定处理，不默认增加审批或重做其他图片。")
     contents = [INSTRUCTION, boundaries, canonical(context), output]
     layers = [{"index": i + 1, "name": name, "version": context['version'], "content": value,
                "content_sha256": sha256(value.encode()).hexdigest()}
@@ -83,6 +87,17 @@ class C07Service(C06Service):
                      "marketing_source_status": "QUICK_A_REFERENCE_APPLICABLE / NOT_INDEPENDENTLY_CERTIFIED",
                      "initial_AI_content_decisions": original["C04_MARKETING_CONTENT"]["claim_decisions"],
                      "initial_AI_decision_status": "PROPOSED / NOT_OPERATOR_APPROVED; current explicit requirements govern presentation"}
+        from .requirements import effective_requirements
+        requirements = effective_requirements(task, slot)
+        if requirements is not None:
+            from .image_review import ReviewStore
+            reviews = ReviewStore(self.store.database, CandidateStore(self.store.database, self.settings.data_dir),
+                                  test_mode=self.test_mode).list(task_id, slot_id)
+            review = next((r for r in reversed(reviews) if r['image_version_id'] == str(base_id)), None)
+            requirements['selected_base_review'] = {'image_version_id': str(base_id),
+                'is_passed': bool(review and review['decision'] == 'PASS'),
+                'review_id': review['id'] if review else None, 'source': review['source'] if review else 'NOT_REVIEWED'}
+            effective["effective_requirements"] = requirements
         business_docs = [{"file": name, "sha256": sha256((self.service.source_root / name).read_bytes()).hexdigest()}
                          for name in ("docs/business/02_INTENT_AND_CONTEXT_RULES.md", "docs/business/04_IMAGE_CREATION_WORK_METHOD.md")]
         return {"base": base, "root": root, "root_id": root_id, "image_inputs": image_inputs,
@@ -115,6 +130,8 @@ class C07Service(C06Service):
                     "actual_model_input": None, "model_api_call_attempted": False,
                     "effective_state": {"operation": "REVISION_OF_EXPLICIT_BASE", "base_image_version_id": str(base_id),
                                         "scope": "ONE_SLOT", "operator_approved": False}}
+        if "effective_requirements" in sources["effective_constraints"]:
+            snapshot["effective_state"]["effective_requirements"] = sources["effective_constraints"]["effective_requirements"]
         # The existing asset FK keeps original product lineage; capability_specific_inputs explicitly
         # identifies the frozen IMAGE_VERSION bytes. This copy is not another business Asset.
         return self.service.evidence.save_snapshot(snapshot, sources["bytes"][0])

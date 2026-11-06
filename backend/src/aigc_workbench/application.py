@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 from uuid import UUID, uuid4
 
-from .domain import Asset, AssetRole, Conflict, ImageMetadata, ImageSlot, InvalidTask, SlotKind, Task
+from .domain import OverallRequirement, Asset, AssetRole, Conflict, ImageMetadata, ImageSlot, InvalidTask, SlotKind, Task
 
 
 class TaskNotFound(LookupError):
@@ -19,7 +19,10 @@ class StorageUnavailable(OSError):
 class TaskChanges(Protocol):
     def get_task(self, task_id: UUID) -> Task | None: ...
     def task_creation(self, operation_id: UUID) -> Task | None: ...
-    def add_task(self, task: Task, operation_id: UUID) -> None: ...
+    def add_task(self, task: Task, operation_id: UUID, overall_requirement: str = "") -> None: ...
+    def creation_requirement(self, operation_id: UUID) -> str: ...
+    def requirement_operation(self, task_id: UUID, operation_id: UUID) -> OverallRequirement | None: ...
+    def add_requirement(self, requirement: OverallRequirement, operation_id: UUID) -> None: ...
     def asset_upload(self, task_id: UUID, operation_id: UUID) -> Asset | None: ...
     def add_asset(self, asset: Asset, operation_id: UUID) -> None: ...
     def slot_creation(self, task_id: UUID, operation_id: UUID) -> ImageSlot | None: ...
@@ -52,17 +55,37 @@ class TaskService:
     def __init__(self, store: TaskStore, files: ImageFiles):
         self.store, self.files = store, files
 
-    def create_draft(self, title: str, operation_id: UUID) -> Task:
+    def create_draft(self, title: str, operation_id: UUID, overall_requirement: str = "") -> Task:
         title = Task.normalize_title(title)
+        OverallRequirement.validate(overall_requirement)
         with self.store.write() as changes:
             previous = changes.task_creation(operation_id)
             if previous:
-                if previous.title != title:
+                if previous.title != title or changes.creation_requirement(operation_id) != overall_requirement:
                     raise Conflict("同一创建操作不能用于不同任务内容。")
                 return previous
             task = Task.create(title)
-            changes.add_task(task, operation_id)
+            changes.add_task(task, operation_id, overall_requirement)
+            if overall_requirement:
+                changes.add_requirement(OverallRequirement(uuid4(), task.id, 1, overall_requirement, datetime.now(timezone.utc)), operation_id)
+            task = changes.get_task(task.id)
         return task
+
+    def save_overall_requirement(self, task_id: UUID, text: str, expected_version: int, operation_id: UUID) -> Task:
+        OverallRequirement.validate(text)
+        with self.store.write() as changes:
+            task = require_task(changes.get_task(task_id))
+            previous = changes.requirement_operation(task_id, operation_id)
+            if previous:
+                if previous.text != text or previous.version != expected_version + 1:
+                    raise Conflict("同一要求保存操作不能更换内容或基础版本。")
+                return task
+            current_version = task.overall_requirement.version if task.overall_requirement else 0
+            if type(expected_version) is not int or expected_version != current_version:
+                raise Conflict("整体要求版本已变化，请重新读取服务器版本后再编辑；未覆盖。")
+            changes.add_requirement(OverallRequirement(uuid4(), task_id, current_version + 1, text,
+                                                       datetime.now(timezone.utc)), operation_id)
+            return require_task(changes.get_task(task_id))
 
     def get_draft(self, task_id: UUID) -> Task:
         return require_task(self.store.get(task_id))

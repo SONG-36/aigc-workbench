@@ -148,6 +148,10 @@ class QuickACreationDecisionService(C02RealService):
                          slot_state={"id": str(slot.id), "kind": slot.kind.value,
                                      "reference_asset_id": str(slot.reference_asset_id),
                                      "output_size": slot.output_size, "requirements": slot.requirements})
+        from .requirements import effective_requirements
+        requirements = effective_requirements(task, slot)
+        if requirements is not None:
+            selection["effective_requirements"] = requirements
         return selection, product, reference, runs
 
     def prepare(self, task_id: UUID, slot_id: UUID, product_id: UUID, reference_id: UUID,
@@ -189,6 +193,8 @@ class QuickACreationDecisionService(C02RealService):
             rule_sources.append({'file': name, 'sha256': sha256((self.service.source_root / name).read_bytes()).hexdigest()})
             context.update(version=WORKSPACE_VERSION,
                 operator_requirements={"persisted_slot_requirement": selection["slot_state"]["requirements"]})
+        if "effective_requirements" in selection:
+            context["effective_requirements"] = selection["effective_requirements"]
         identity = str(uuid4())
         snapshot = {"id": identity, "created_at": now(), "capability": "C03_C04_C05", "task_id": str(task_id),
                     "slot_id": str(slot_id), "product_asset_id": str(product_id), "reference_asset_id": str(reference_id),
@@ -201,6 +207,8 @@ class QuickACreationDecisionService(C02RealService):
                     "input_classification": "PLANNED MODEL INPUT", "model_api_call_attempted": False}
         if self.workspace:
             snapshot['effective_state']['operation'] = 'QUICK_A_SLOT_IMAGE_CREATION_DECISION'
+        if "effective_requirements" in selection:
+            snapshot["effective_state"]["effective_requirements"] = selection["effective_requirements"]
         # Existing immutable store freezes the product; reference bytes remain in its existing C02 snapshot.
         return self.service.evidence.save_snapshot(snapshot, product)
 

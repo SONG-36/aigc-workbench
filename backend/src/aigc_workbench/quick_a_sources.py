@@ -9,6 +9,7 @@ from .c01_model import vision_endpoint, DEFAULT_UNDERSTANDING_MODEL, VISION_OUTP
 from .c01_prompt import OUTPUT_CONTRACT, compose_prompt
 from .c01_real import C01RealService
 from .domain import AssetRole
+from .requirements import effective_requirements
 from .image_sizes import output_plan
 
 BUSINESS_FILES = ("docs/business/01_BUSINESS_MODES.md", "docs/business/02_INTENT_AND_CONTEXT_RULES.md",
@@ -41,6 +42,9 @@ def current_sources(service, task_id, slot_id):
              "product_selection": "LATEST_UPLOADED_PRODUCT_IMAGE / SHOWN_IN_WORKSPACE",
              "business_documents": documents(service.source_root), "output_plan": output_plan(slot.output_size),
              "operator_confirmed_information": []}
+    requirements = effective_requirements(task, slot)
+    if requirements is not None:
+        state["effective_requirements"] = requirements
     return state, (product_bytes, reference_bytes)
 
 

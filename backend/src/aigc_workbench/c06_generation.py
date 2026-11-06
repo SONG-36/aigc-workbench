@@ -37,10 +37,14 @@ def image_parameters(plan: dict, model: str = MODEL) -> dict:
 
 
 def generation_prompt(sources: dict, plan: dict) -> str:
+    effective = sources["decision_snapshot"]["context"].get("effective_requirements")
+    instruction = sources["prompt"]
+    if effective is not None:
+        instruction += "\n\nEFFECTIVE OPERATOR REQUIREMENTS (versioned business input, not product facts):\n" + canonical(effective)
     if (plan["requested_output_size"] == plan["model_generation_size"]
             == sources["decision_snapshot"]["context"]["slot_state"]["output_size"]):
-        return sources["prompt"]
-    return (sources["prompt"] + "\n\nOUTPUT PIXEL SIZE OVERRIDE (not product physical dimensions): "
+        return instruction
+    return (instruction + "\n\nOUTPUT PIXEL SIZE OVERRIDE (not product physical dimensions): "
             + f"requested_output_size={plan['requested_output_size']}; model_generation_size={plan['model_generation_size']}; "
             + f"final_output_size={plan['final_output_size']}; postprocess={plan['postprocess']}. "
             + "Use the actual model canvas for composition, overriding only prior canvas pixel size/aspect instructions. "
@@ -239,6 +243,8 @@ class C06Service(C01RealService):
                    "capability_specific_inputs": old["context"]["capability_specific_inputs"],
                    "operator_confirmed_information": [], "production_instruction": prompt,
                    "decision_snapshot_id": str(decision_id), "source_provenance": sources["sources"]}
+        if "effective_requirements" in old["context"]:
+            context["effective_requirements"] = old["context"]["effective_requirements"]
         planned_images = old["prompt"]["planned_model_input"]["images"]
         snapshot = {"id": identity, "created_at": now(), "capability": "C06", "task_id": old["task_id"],
                     "slot_id": old["slot_id"], "product_asset_id": old["product_asset_id"],

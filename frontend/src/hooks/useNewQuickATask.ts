@@ -10,13 +10,13 @@ type Role = 'product' | 'reference'
 type Files = Record<Role, File | null>
 type FileInfo = Pick<File, 'name' | 'size' | 'type' | 'lastModified'>
 type Draft = {
-  title: string; operationId: string; kind: SlotKind; size: OutputSize; requirements: string
+  title: string; overallRequirements: string; operationId: string; kind: SlotKind; size: OutputSize; requirements: string
   productOp: string; referenceOp: string; slotOp: string; started: boolean
   taskId: string | null; productId: string | null; referenceId: string | null; slotId: string | null
   fileInfo: Record<Role, FileInfo | null>
 }
 function restore(): Draft {
-  const fresh: Draft = { title: '', operationId: operationId(), kind: 'main', size: '1024x1536', requirements: '',
+  const fresh: Draft = { title: '', overallRequirements: '', operationId: operationId(), kind: 'main', size: '1024x1536', requirements: '',
     productOp: operationId(), referenceOp: operationId(), slotOp: operationId(), started: false,
     taskId: null, productId: null, referenceId: null, slotId: null, fileInfo: { product: null, reference: null } }
   try {
@@ -80,7 +80,7 @@ export function useNewQuickATask() {
     return () => { active.current = false; window.removeEventListener('beforeunload', beforeUnload) }
   }, [])
 
-  function edit(patch: Partial<Pick<Draft, 'title' | 'kind' | 'size' | 'requirements'>>) {
+  function edit(patch: Partial<Pick<Draft, 'title' | 'overallRequirements' | 'kind' | 'size' | 'requirements'>>) {
     if (!current.current.started && !inFlight.current) checkpoint(patch)
   }
   function canChoose(role: Role) {
@@ -119,7 +119,7 @@ export function useNewQuickATask() {
       checkpoint({ started: true })
       progress(current.current.taskId ? '恢复已保存任务' : '创建任务')
       let saved = current.current.taskId ? await getTask(current.current.taskId)
-        : await createQuickADraft(current.current.title, current.current.operationId)
+        : await createQuickADraft(current.current.title, current.current.operationId, current.current.overallRequirements)
       checkpoint({ taskId: saved.id }); publish(saved)
       if (!active.current) return
       for (const r of ['product', 'reference'] as const) {
@@ -151,7 +151,8 @@ export function useNewQuickATask() {
       saved = await configureSlot(saved.id, slot, { reference_asset_id: current.current.referenceId,
         output_size: current.current.size, requirements: current.current.requirements })
       const ready = saved.slots.find(s => s.id === current.current.slotId)
-      if (!ready?.inputs_ready || !saved.materials_ready || ready.reference_asset_id !== current.current.referenceId
+      if (saved.overall_requirement?.text !== current.current.overallRequirements
+        || !ready?.inputs_ready || !saved.materials_ready || ready.reference_asset_id !== current.current.referenceId
         || ready.output_size !== current.current.size || ready.requirements !== current.current.requirements)
         throw new ApiError('服务器尚未确认资料和图位已完整保存，请核对后重试。', 'unknown')
       publish(saved); remember(null)

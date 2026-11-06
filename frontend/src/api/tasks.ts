@@ -40,14 +40,23 @@ function decodeTask(value: unknown): TaskDraft {
       && typeof s.inputs_ready === 'boolean')) {
     throw new ApiError('服务器返回的任务格式不符合当前接口，未应用该状态。', 'unknown')
   }
-  return t as TaskDraft
+  const r = t.overall_requirement
+  if (r && (r.task_id !== t.id || r.scope !== 'TASK_ALL_SLOTS' || !Number.isInteger(r.version) || r.version < 0
+    || typeof r.text !== 'string' || r.text.length > 2000 || typeof r.source !== 'string'
+    || (r.version > 0 && (typeof r.id !== 'string' || typeof r.saved_at !== 'string')))) {
+    throw new ApiError('整体要求的版本或作用范围不符合当前任务，未应用。', 'unknown')
+  }
+  return {...t, overall_requirement: r || {id: null, task_id: t.id, version: 0, text: '', scope: 'TASK_ALL_SLOTS',
+    saved_at: null, source: 'NOT_PROVIDED'}} as TaskDraft
 }
 
-export async function createQuickADraft(title: string, operationId: string): Promise<TaskDraft> {
-  return decodeTask(await request('/tasks', {
+export async function createQuickADraft(title: string, operationId: string, overallRequirements = ''): Promise<TaskDraft> {
+  const task = decodeTask(await request('/tasks', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, operation_id: operationId }),
+    body: JSON.stringify({ title, operation_id: operationId, ...(overallRequirements ? {overall_requirements: overallRequirements} : {}) }),
   }))
+  if (task.overall_requirement?.text !== overallRequirements) throw new ApiError('服务器未确认本次整体要求已保存，请核对任务；输入仍保留。', 'unknown')
+  return task
 }
 
 export async function getTask(id: string, signal?: AbortSignal): Promise<TaskDraft> {
@@ -79,4 +88,16 @@ export async function configureSlot(taskId: string, slot: ImageSlot,
   return decodeTask(await request(`/tasks/${taskId}/slots/${slot.id}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values),
   }))
+}
+
+
+export async function saveOverallRequirement(taskId: string, text: string, expectedVersion: number, operationId: string) {
+  const task = decodeTask(await request(`/tasks/${taskId}/overall-requirement`, {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({text, expected_version: expectedVersion, operation_id: operationId}),
+  }))
+  if (task.overall_requirement?.text !== text || task.overall_requirement.version <= expectedVersion) {
+    throw new ApiError('服务器未确认本次要求版本，请重新读取核对；未应用为保存成功。', 'unknown')
+  }
+  return task
 }

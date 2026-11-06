@@ -479,7 +479,9 @@ Pilot 生产构建、Mac mini 环境核查、私有配置、launchd、备份/恢
 
 新建页面可同时选择任务名、商品图、营销参考、首个图位、输出像素尺寸及本图要求；一次点击后依次调用现有 Task / Asset / Slot API，成功后进入正式 Workspace。保存本身不调用模型。每步保留服务器身份及 Operation ID；部分失败继续同一次保存，已保存文件跳过。待上传文件暂存在当前浏览器 IndexedDB，成功后清除；浏览器不支持暂存时会提示刷新需重选原文件。服务器始终是业务状态权威。
 
-整体运营要求目前没有保存与 Effective Context 契约，输入明确禁用；仅具体图位要求已保存并参与制作依据。
+整体运营要求可在新建页与 Task 原子保存，也可在 Workspace 编辑；`PUT /api/tasks/{id}/overall-requirement` 接收 `text / expected_version / operation_id`。作用范围固定为本 Task 全部图位的后续生成与显式修改，最多 2000 字符。未提供为 V0，后续保存追加 V1、V2…；清空也保留新版本。并发旧版本返回 409，同一 Operation ID 不重复追加；未保存输入不会冒充服务器状态。
+
+SQLite V9 只追加不可变 `task_requirements` 和创建操作的原始整体要求字段，既有任务保持 V0，历史 Snapshot/Run/图片/Pass 不改写。C01/C02 保持纯图片观察；C03～C05 通过 Effective State 与 Context Assembly 同时取得整体和逐图要求及其来源/范围/版本。C06 冻结并发送适用要求，整体要求更新后不能重用失效制作决定；C07 使用明确选定基础版本、当前要求和本轮意见，旧修改报价在要求变化后以 409 拒绝。保存整体要求不派发任务、不重做图片、不使原 Pass 失效。自然语言冲突不采用简单最后输入优先，也不新增全局审批步骤。
 
 新 Workspace 操作的 C01、C02、C03/C04/C05 默认使用 `gpt-6.1-terra`（[模型](https://developers.openai.com/api/docs/models/gpt-6.1-terra)、[迁移参数](https://developers.openai.com/api/docs/guides/latest-model)）：实际图片 data URI、四层 Prompt、严格 JSON Schema 保留，`reasoning.effort=medium`，不传 `temperature`；C01/C02 输出上限 8192、合并制作决定 16384（均包含 reasoning tokens）。解析跳过 reasoning 项，仅解析最终 message 的结构化文本；拒绝、不完整响应和模型不一致均保留原始证据。固定 S03 历史 CLI 与既有 Snapshot/Run 不改写。
 

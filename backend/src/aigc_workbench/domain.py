@@ -84,6 +84,27 @@ class ImageSlot:
 
 
 @dataclass(frozen=True)
+class OverallRequirement:
+    id: UUID
+    task_id: UUID
+    version: int
+    text: str
+    saved_at: datetime
+    scope: str = "TASK_ALL_SLOTS"
+
+    @staticmethod
+    def validate(text: str) -> str:
+        if not isinstance(text, str) or len(text) > 2000:
+            raise InvalidTask("整体运营要求须为文本，最多 2000 字符。")
+        return text
+
+    def projection(self) -> dict:
+        return {"id": str(self.id), "task_id": str(self.task_id), "version": self.version,
+                "text": self.text, "scope": self.scope, "saved_at": self.saved_at.isoformat(),
+                "source": "EXPLICIT_OPERATOR_REQUIREMENT / UNAUTHENTICATED_OPERATOR"}
+
+
+@dataclass(frozen=True)
 class Task:
     id: UUID
     title: str
@@ -92,6 +113,7 @@ class Task:
     status: str = "draft"
     assets: tuple[Asset, ...] = ()
     slots: tuple[ImageSlot, ...] = ()
+    overall_requirement: OverallRequirement | None = None
 
     @classmethod
     def create(cls, title: str) -> "Task":
