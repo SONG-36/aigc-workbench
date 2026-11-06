@@ -6,7 +6,7 @@ from uuid import UUID, uuid5
 
 from .c01_context import C01Error, fingerprint
 from .c01_execution import C01Service
-from .c01_model import MODEL as VISION_MODEL
+from .c01_model import DEFAULT_UNDERSTANDING_MODEL as VISION_MODEL, VISION_OUTPUT_TOKENS, DECISION_OUTPUT_TOKENS
 from .c01_persistence import C01EvidenceStore
 from .c01_model_store import C01ModelStore
 from .c02_reference import C02RealService
@@ -64,7 +64,7 @@ class QuickACreation:
             if run['transport_label'] != expected_transport or run['requested_model'] != VISION_MODEL:
                 continue
             try:
-                flight = service.preflight(UUID(snapshot['id']), VISION_MODEL)
+                flight = service.preflight(UUID(snapshot['id']), VISION_MODEL, VISION_OUTPUT_TOKENS)
                 if fingerprint(snapshot) != run['snapshot_sha256'] or flight['request_sha256'] != run['request_sha256']:
                     continue
                 if capability == 'C02' and any(sha256((self.service.source_root / item['file']).read_bytes()).hexdigest()
@@ -82,7 +82,7 @@ class QuickACreation:
             return None  # A new explicit operation may retry a known failure, never an unknown result.
         return None
 
-    def _step(self, capability, service, prepare, *, model=VISION_MODEL, tokens=4096, cache=False):
+    def _step(self, capability, service, prepare, *, model=VISION_MODEL, tokens=VISION_OUTPUT_TOKENS, cache=False):
         self._assert_sources()
         self._progress(capability)
         cached = self._cached(capability, service) if cache else None
@@ -123,7 +123,7 @@ class QuickACreation:
         reference_run = self._step('C02', c02, lambda: c02.prepare(task, slot, reference), cache=True)
         decision = QuickACreationDecisionService(self.settings, self.service, workspace=True, test_mode=self.test_mode)
         decision_run = self._step('C03_C04_C05', decision, lambda: decision.prepare(task, slot, product, reference,
-            UUID(product_run['run_id']), UUID(reference_run['run_id'])), tokens=8192)
+            UUID(product_run['run_id']), UUID(reference_run['run_id'])), tokens=DECISION_OUTPUT_TOKENS)
         c06 = C06Service(self.settings, self.service, test_mode=self.test_mode)
         result = self._step('C06', c06, lambda: c06.prepare_current_decision(decision_run), model=IMAGE_MODEL)
         self._progress('REVIEW_PENDING')

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../App'
 import { ApiError, createQuickADraft } from '../api/tasks'
 import type { Asset, TaskDraft } from '../types'
+import { chooseImages, taskHttp } from './newTaskFixture'
 
 const task: TaskDraft = {
   id: '2e5c749d-99ce-4fd1-8433-bf6a4d21d931', title: 'S01',
@@ -81,7 +82,8 @@ describe('S01 deterministic UI contracts with explicit HTTP mocks', () => {
     mount('/workspace/new')
     const user = userEvent.setup()
     await user.type(screen.getByLabelText('任务名称'), 'late')
-    await user.click(screen.getByRole('button', { name: '保存 Quick-A 草稿' }))
+    await chooseImages(user)
+    await user.click(screen.getByRole('button', { name: '保存任务和资料，进入工作台' }))
     await user.click(screen.getByRole('link', { name: '任务中心' }))
     await screen.findByText(/尚无任务/)
     await act(async () => {
@@ -97,43 +99,46 @@ describe('S01 deterministic UI contracts with explicit HTTP mocks', () => {
 
   it('retries an unknown Task result with the exact same operation and content', async () => {
     const fetchMock = vi.fn().mockRejectedValueOnce(new Error('lost response'))
-      .mockResolvedValueOnce(json(task, 201)).mockResolvedValue(json(task))
+      .mockResolvedValueOnce(json(task, 201)).mockImplementation(taskHttp(task).handle)
     vi.stubGlobal('fetch', fetchMock)
     mount('/workspace/new')
     const user = userEvent.setup()
     await user.type(screen.getByLabelText('任务名称'), 'unknown')
-    await user.click(screen.getByRole('button', { name: '保存 Quick-A 草稿' }))
+    await chooseImages(user)
+    await user.click(screen.getByRole('button', { name: '保存任务和资料，进入工作台' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('保存结果未知')
     expect(screen.getByLabelText('任务名称')).toBeDisabled()
-    await user.click(screen.getByRole('button', { name: '安全重试本次保存' }))
+    await user.click(screen.getByRole('button', { name: '继续保存任务和资料' }))
     await screen.findByTestId('task-id')
     expect(fetchMock.mock.calls[0][1].body).toBe(fetchMock.mock.calls[1][1].body)
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).operation_id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(JSON.parse(fetchMock.mock.calls[0][1]!.body as string).operation_id).toMatch(/^[0-9a-f-]{36}$/)
     expect(sessionStorage.getItem('aigc.pending-task-creation')).toBeNull()
   })
 
   it('restores only a pending creation intent after reload and never auto-submits', async () => {
     const operationId = crypto.randomUUID()
     sessionStorage.setItem('aigc.pending-task-creation', JSON.stringify({ title: 'pending', operationId }))
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(json(task)))
+    const fetchMock = vi.fn(taskHttp(task).handle)
     vi.stubGlobal('fetch', fetchMock)
     mount('/workspace/new')
     expect(screen.getByLabelText('任务名称')).toHaveValue('pending')
     expect(fetchMock).not.toHaveBeenCalled()
-    await userEvent.click(screen.getByRole('button', { name: '保存 Quick-A 草稿' }))
+    await chooseImages()
+    await userEvent.click(screen.getByRole('button', { name: '保存任务和资料，进入工作台' }))
     await screen.findByTestId('task-id')
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ title: 'pending', operation_id: operationId })
+    expect(JSON.parse(fetchMock.mock.calls[0][1]!.body as string)).toEqual({ title: 'pending', operation_id: operationId })
   })
 
   it('a definite rejection remains editable and is not shown as unknown', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ error: { message: 'conflict' } }, 409)))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ error: { message: 'conflict' } }, 422)))
     mount('/workspace/new')
     const user = userEvent.setup()
     await user.type(screen.getByLabelText('任务名称'), 'bad')
-    await user.click(screen.getByRole('button', { name: '保存 Quick-A 草稿' }))
+    await chooseImages(user)
+    await user.click(screen.getByRole('button', { name: '保存任务和资料，进入工作台' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('conflict')
     expect(screen.getByLabelText('任务名称')).not.toBeDisabled()
-    expect(screen.queryByRole('button', { name: '安全重试本次保存' })).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).not.toHaveTextContent('结果尚未确认')
   })
 
   it('treats an unreadable success response as unknown, not a rejected write', async () => {

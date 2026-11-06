@@ -88,6 +88,10 @@ def test_new_task_http_to_c01_c02_decision_c06_and_restart(config, size):
         with Image.open(BytesIO(client.get(candidate['url']).content)) as image:
             assert image.size == tuple(map(int, size.split('x')))
         assert len(understanding.requests) == 3 and len(images.requests) == 1
+        assert all(r['model'] == 'gpt-6.1-terra' and r['reasoning'] == {'effort': 'medium'}
+                   and 'temperature' not in r for r in understanding.requests)
+        assert [r['max_output_tokens'] for r in understanding.requests] == [8192, 8192, 16384]
+        assert images.requests[0]['model'] == 'gpt-image-2.6-sunburst'
         assert image_bytes(understanding.requests[0]) == [originals[0]]
         assert image_bytes(understanding.requests[1]) == [originals[1]]
         assert 'TEST_ONLY_PRODUCT_COMPONENT' not in understanding.requests[1]['input'][0]['content'][0]['text']
@@ -191,6 +195,7 @@ def test_selected_base_revision_and_explicit_test_review_preserve_version(config
             'snapshot_id': q['snapshot_id'], 'quote_token': q['quote_token']}).status_code == 202
         body = finish(client, path); v2 = body['candidates'][0]
         assert v2['image_version_id'] != v1['image_version_id'] and v2['base_image_version_id'] == v1['image_version_id']
+        assert images.requests[-1]['model'] == 'gpt-image-2.6-sunburst'
         assert image_bytes(images.requests[-1])[0] == original
         assert client.get(v1['url']).content == original
         assert not v2['pass'] and not body['delivery']

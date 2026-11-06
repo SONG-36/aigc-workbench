@@ -31,7 +31,8 @@ export function WorkspaceShell({ task, children, output }: { task: TaskDraft | n
               : '尚未提供商品图与营销参考，或图位绑定未齐备；不可生成。'}</dd></dl>
         </section>}
         {children}
-        <label className="unavailable">整体运营要求（后续接通）<textarea disabled rows={3} /></label>
+        <label className="unavailable">整体运营要求（尚不可用）<textarea aria-label="整体运营要求（尚不可用）" disabled rows={3} /></label>
+        <p className="muted">整体运营要求暂不保存，也不进入制作依据。当前请在具体图位填写补充制作要求。</p>
       </div>
     </details>
     <section id="output" aria-labelledby="output-title">

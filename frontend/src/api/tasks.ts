@@ -2,7 +2,7 @@ import type { AssetRole, ImageSlot, SlotKind, TaskDraft } from '../types'
 import { OUTPUT_SIZES } from '../types'
 
 export class ApiError extends Error {
-  constructor(message: string, readonly outcome: 'rejected' | 'unknown') { super(message) }
+  constructor(message: string, readonly outcome: 'rejected' | 'unknown', readonly status?: number) { super(message) }
 }
 
 export async function request(path: string, options: RequestInit = {}): Promise<unknown> {
@@ -14,12 +14,12 @@ export async function request(path: string, options: RequestInit = {}): Promise<
   try { body = await response.json() }
   catch {
     throw new ApiError('服务未返回可读数据，请查询后再处理。',
-      response.status >= 400 && response.status < 500 ? 'rejected' : 'unknown')
+      response.status >= 400 && response.status < 500 ? 'rejected' : 'unknown', response.status)
   }
   if (!response.ok) {
     const message = (body as { error?: { message?: string } })?.error?.message
     throw new ApiError(message || `请求失败（${response.status}）。`,
-      response.status < 500 ? 'rejected' : 'unknown')
+      response.status < 500 ? 'rejected' : 'unknown', response.status)
   }
   return body
 }

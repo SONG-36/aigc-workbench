@@ -24,7 +24,7 @@ export function TaskCenter() {
   return <>
     <div className="heading task-hero"><div><p className="eyebrow">COMMERCE IMAGE WORKSPACE</p>
       <h1>让商品图片，进入下一版。</h1><p className="muted">在独立任务中保存资料，继续下一步工作。</p></div>
-      <Link className="primary button-link" to="/workspace/new">＋ 创建 Quick-A 草稿</Link></div>
+      <Link className="primary button-link" to="/workspace/new">＋ 新建 Quick-A</Link></div>
     <section aria-labelledby="task-list-title"><div className="section-head task-list-heading">
       <h2 id="task-list-title">制作任务</h2><p className="muted">打开已有任务，恢复服务器保存的草稿。</p>
       <button type="button" onClick={() => setReload(value => value + 1)} disabled={loading}>刷新列表</button>

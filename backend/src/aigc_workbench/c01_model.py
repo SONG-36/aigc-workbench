@@ -18,7 +18,11 @@ import urllib.request
 from .c01_context import C01Error, canonical
 from .c01_prompt import OUTPUT_CONTRACT, OUTPUT_FIELDS
 
-MODEL = "gpt-4.1-mini-2025-04-14"
+MODEL = "gpt-4.1-mini-2025-04-14"  # Fixed historical S03 experiment; never rewrite its records.
+DEFAULT_UNDERSTANDING_MODEL = "gpt-6.1-terra"
+VISION_OUTPUT_TOKENS = 8192
+DECISION_OUTPUT_TOKENS = 16384
+TERRA_PRICING_CHECKED = "2026-11-06"
 ENDPOINT = "https://api.openai.com/v1/responses"
 PRICING_SOURCE = "https://developers.openai.com/api/docs/pricing"
 PRICING_CHECKED = "2026-11-05"
@@ -58,8 +62,9 @@ def multimodal_request(text: str, image: bytes, media_type: str, schema: dict, s
                        additional_images: tuple[tuple[bytes, str], ...] = (), output_ceiling: int = 4096) -> dict:
     """Shared serializer for the two explicit capabilities; no routing or Prompt registry."""
     from .bailian_model import VISION_MODEL, vision_request
-    if (model not in {MODEL, VISION_MODEL} or type(max_output_tokens) is not int or output_ceiling not in {4096, 8192}
-            or not 256 <= max_output_tokens <= output_ceiling or len(additional_images) > 1):
+    ceiling = DECISION_OUTPUT_TOKENS if model == DEFAULT_UNDERSTANDING_MODEL else output_ceiling
+    if (model not in {MODEL, DEFAULT_UNDERSTANDING_MODEL, VISION_MODEL} or type(max_output_tokens) is not int or output_ceiling not in {4096, 8192}
+            or not 256 <= max_output_tokens <= ceiling or len(additional_images) > 1):
         raise C01Error("MODEL_PARAMETERS_INVALID", "MODEL_PREFLIGHT", "模型或输出上限不受支持。")
     if media_type not in {"image/jpeg", "image/png", "image/webp"} or not text or not image:
         raise C01Error("MODEL_INPUT_INVALID", "MODEL_PREFLIGHT", "需要明确文字和已校验的实际图片。")
@@ -70,7 +75,8 @@ def multimodal_request(text: str, image: bytes, media_type: str, schema: dict, s
         return vision_request(text, images, schema, model, max_output_tokens)
     return {
         "model": model, "store": False, "stream": False, "service_tier": "default",
-        "temperature": 0, "max_output_tokens": max_output_tokens,
+        **({"reasoning": {"effort": "medium"}} if model == DEFAULT_UNDERSTANDING_MODEL else {"temperature": 0}),
+        "max_output_tokens": max_output_tokens,
         "input": [{"role": "user", "content": [
             {"type": "input_text", "text": text},
             *[{"type": "input_image", "detail": "high",
@@ -89,19 +95,28 @@ def estimate_cost(snapshot: dict, request: dict) -> dict:
         return quote(request)
     source = snapshot["context"]["capability_specific_inputs"]
     # Use unresized patches: intentionally overestimates when the provider downsizes.
-    image_tokens = sum(ceil(ceil(item["width"] / 32) * ceil(item["height"] / 32) * 1.62)
+    terra = request["model"] == DEFAULT_UNDERSTANDING_MODEL
+    # Terra allowance is a planning heuristic, not the legacy model's official image tokenizer.
+    patch, multiplier = (16, 2) if terra else (32, 1.62)
+    image_tokens = sum(ceil(ceil(item["width"] / patch) * ceil(item["height"] / patch) * multiplier)
                        for item in snapshot["context"].get("image_inputs", [source]))
     text_bytes = len(request["input"][0]["content"][0]["text"].encode())
     schema_bytes = len(canonical(request["text"]).encode())
     input_envelope = text_bytes + schema_bytes + image_tokens + 4096
-    amount = (Decimal(input_envelope) * INPUT_RATE
-              + Decimal(request["max_output_tokens"]) * OUTPUT_RATE) / 1_000_000
+    input_rate, output_rate = (Decimal("1"), Decimal("5")) if terra else (INPUT_RATE, OUTPUT_RATE)
+    if terra and input_envelope > 272000:
+        input_rate, output_rate = Decimal("2"), Decimal("7.50")
+    planning_input_rate = input_rate * Decimal("1.25") if terra else input_rate
+    amount = (Decimal(input_envelope) * planning_input_rate
+              + Decimal(request["max_output_tokens"]) * output_rate) / 1_000_000
     return {"currency": "USD", "planning_envelope_usd": str(amount),
             "input_token_envelope": input_envelope, "unresized_image_token_envelope": image_tokens,
             "output_token_limit": request["max_output_tokens"],
-            "input_usd_per_million": str(INPUT_RATE), "output_usd_per_million": str(OUTPUT_RATE),
-            "source": PRICING_SOURCE, "checked_on": PRICING_CHECKED,
-            "method": "UTF8 text/schema bytes + unresized 32px patches x1.62 +4096 overhead; no cache discount",
+            "input_usd_per_million": str(input_rate), "output_usd_per_million": str(output_rate),
+            "planning_input_usd_per_million": str(planning_input_rate),
+            "source": PRICING_SOURCE, "checked_on": TERRA_PRICING_CHECKED if terra else PRICING_CHECKED,
+            "method": ("UTF8 text/schema bytes + conservative unresized 16px patches x2 +4096 overhead; "
+                       "heuristic only, not official tokenization; input allows default 30m cache writes; output includes reasoning" if terra else "UTF8 text/schema bytes + unresized 32px patches x1.62 +4096 overhead; no cache discount"),
             "limitation": "估算保护，非精确分词或供应商硬费用上限；实际账单、税费和额度未知。"}
 
 
@@ -127,7 +142,7 @@ def authorize(settings, confirmed: bool, max_cost_usd: str, quote: dict) -> None
         raise C01Error("BUDGET_INVALID", "ACCESS", "需要明确、有限、正数的 USD 上限。") from exc
     if budget < Decimal(quote["planning_envelope_usd"]):
         raise C01Error("BUDGET_TOO_LOW", "ACCESS", "预算低于保守预检估算；未调用。")
-    if not 0 <= (date.today() - date.fromisoformat(PRICING_CHECKED)).days <= 7:
+    if not 0 <= (date.today() - date.fromisoformat(quote.get("checked_on", PRICING_CHECKED))).days <= 7:
         raise C01Error("PRICING_RECHECK_REQUIRED", "ACCESS", "价格核对已过期，先重新核对官方依据。")
     if os.environ.get("OPENAI_BASE_URL"):
         raise C01Error("CUSTOM_ENDPOINT_NOT_SUPPORTED", "ACCESS", "本适配器仅支持官方固定端点。")
@@ -196,7 +211,7 @@ class OpenAIResponsesTransport:
     origin = "https://api.openai.com"
     credential_name = "OPENAI_API_KEY"
     allowed_requests = {("POST", "/v1/responses"), ("POST", "/v1/images/edits"),
-                        ("GET", "/v1/models/" + MODEL)}
+                        ("GET", "/v1/models/" + MODEL), ("GET", "/v1/models/" + DEFAULT_UNDERSTANDING_MODEL)}
 
     def send(self, payload: bytes) -> HTTPResult:
         result, _ = self._request("POST", "/v1/responses", payload)
@@ -251,7 +266,7 @@ class OpenAIResponsesTransport:
 
     def check_model_access(self, model: str) -> dict:
         """One free metadata GET, using exactly the same network path as send()."""
-        if model != MODEL:
+        if model not in {MODEL, DEFAULT_UNDERSTANDING_MODEL}:
             raise C01Error("MODEL_NOT_SUPPORTED", "MODEL_TRANSPORT", "不自动替换实验模型。")
         started = time.monotonic()
         report = {"model": model, "operation": "MODEL_METADATA_GET", "inference_calls": 0,
@@ -330,7 +345,7 @@ def parse_response(raw: dict, model: str) -> dict:
 
 
 def usage_cost(raw: dict | None) -> dict | None:
-    if not isinstance(raw, dict) or raw.get("model") != MODEL:
+    if not isinstance(raw, dict) or raw.get("model") not in {MODEL, DEFAULT_UNDERSTANDING_MODEL}:
         return None  # Do not price an unexpected model using the candidate's rates.
     usage = raw.get("usage") if isinstance(raw, dict) else None
     if not isinstance(usage, dict):
@@ -338,10 +353,41 @@ def usage_cost(raw: dict | None) -> dict | None:
     inputs, outputs = usage.get("input_tokens"), usage.get("output_tokens")
     if type(inputs) is not int or type(outputs) is not int or min(inputs, outputs) < 0:
         return None
-    return {"label": "USAGE_BASED_ESTIMATE_NOT_PROVIDER_BILL", "currency": "USD",
-            "usd": str((inputs * INPUT_RATE + outputs * OUTPUT_RATE) / 1_000_000),
-            "source": PRICING_SOURCE, "checked_on": PRICING_CHECKED,
-            "note": "按全部输入标准价估算，未扣缓存优惠；不是实际账单。"}
+    terra = raw["model"] == DEFAULT_UNDERSTANDING_MODEL
+    input_rate, output_rate = (Decimal("1"), Decimal("5")) if terra else (INPUT_RATE, OUTPUT_RATE)
+    if terra and inputs > 272000:
+        input_rate, output_rate = Decimal("2"), Decimal("7.50")
+    cached, writes, write30, write12 = 0, 0, 0, 0
+    assumed_ttl = False
+    if terra:
+        details = usage.get("input_tokens_details") or {}
+        if not isinstance(details, dict):
+            return None
+        cached, writes = details.get("cached_tokens", 0), details.get("cache_write_tokens", 0)
+        if any(type(n) is not int or n < 0 for n in (cached, writes)) or cached + writes > inputs:
+            return None
+        split = details.get("cache_write_tokens_details")
+        if split is None:
+            # Our serializer never sets a cache TTL: official default is 30m. Preserve that assumption.
+            write30, assumed_ttl = writes, bool(writes)
+        elif isinstance(split, dict):
+            write30, write12 = split.get("ttl_30m_tokens"), split.get("ttl_12h_tokens")
+            if any(type(n) is not int or n < 0 for n in (write30, write12)) or write30 + write12 != writes:
+                return None
+        else:
+            return None
+    cached_rate = Decimal("0.10") if inputs > 272000 else Decimal("0.05")
+    # Cache read/write categories do not overlap. Write rates are TOTAL rates, not surcharges.
+    # output_tokens already includes reasoning; never add reasoning_tokens again.
+    amount = ((inputs - cached - writes) * input_rate + cached * cached_rate
+              + write30 * input_rate * Decimal("1.25") + write12 * input_rate * Decimal("2.5")
+              + outputs * output_rate) / 1_000_000
+    return {"label": "USAGE_BASED_ESTIMATE_NOT_PROVIDER_BILL", "currency": "USD", "usd": str(amount),
+            "source": PRICING_SOURCE, "checked_on": TERRA_PRICING_CHECKED if terra else PRICING_CHECKED,
+            "input_usd_per_million": str(input_rate), "output_usd_per_million": str(output_rate),
+            "cached_input_tokens": cached, "cache_write_30m_tokens": write30, "cache_write_12h_tokens": write12,
+            "cache_write_ttl": "DEFAULT_30M_NOT_RETURNED" if assumed_ttl else "PROVIDER_USAGE_OR_NO_WRITES",
+            "note": "Terra 按普通输入、缓存读取、30m/12h 写入分项；无 TTL 明细按本客户端默认30m；输出已含 reasoning，不重复计费。旧模型输入仍按标准价；不是实际账单。"}
 
 
 def vision_endpoint(model):

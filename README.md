@@ -475,6 +475,18 @@ SQLite V5 仅增加不可变 `image_versions` 记录，候选 PNG 保存在 `.ru
 Pilot 生产构建、Mac mini 环境核查、私有配置、launchd、备份/恢复、更新与回滚见 [部署准备说明](deploy/README.md)。本轮仅准备，未安装或部署。上海使用与供应商支持地区不符，尚不能发布真实 OpenAI Pilot。P2-B1 已接通新 Task 的按需理解和制作决定；缺少有效决定时从当前素材重新准备，不伪造制作输入。
 
 
+### Quick-A 新建资料与当前理解模型
+
+新建页面可同时选择任务名、商品图、营销参考、首个图位、输出像素尺寸及本图要求；一次点击后依次调用现有 Task / Asset / Slot API，成功后进入正式 Workspace。保存本身不调用模型。每步保留服务器身份及 Operation ID；部分失败继续同一次保存，已保存文件跳过。待上传文件暂存在当前浏览器 IndexedDB，成功后清除；浏览器不支持暂存时会提示刷新需重选原文件。服务器始终是业务状态权威。
+
+整体运营要求目前没有保存与 Effective Context 契约，输入明确禁用；仅具体图位要求已保存并参与制作依据。
+
+新 Workspace 操作的 C01、C02、C03/C04/C05 默认使用 `gpt-6.1-terra`（[模型](https://developers.openai.com/api/docs/models/gpt-6.1-terra)、[迁移参数](https://developers.openai.com/api/docs/guides/latest-model)）：实际图片 data URI、四层 Prompt、严格 JSON Schema 保留，`reasoning.effort=medium`，不传 `temperature`；C01/C02 输出上限 8192、合并制作决定 16384（均包含 reasoning tokens）。解析跳过 reasoning 项，仅解析最终 message 的结构化文本；拒绝、不完整响应和模型不一致均保留原始证据。固定 S03 历史 CLI 与既有 Snapshot/Run 不改写。
+
+C06/C07 继续使用 `gpt-image-2.6-sunburst` 与原 Images Edits 接口。开发与 Pilot 服务端启用开关保持独立；更新默认模型不会启用被禁用的真实 AI。
+
+按[官方价格](https://developers.openai.com/api/docs/pricing)与[缓存计费](https://developers.openai.com/api/docs/guides/prompt-caching)，费用估算分别计算普通输入、缓存读取、30m/12h 缓存写入及含 reasoning 的输出；客户端未设置 TTL 时沿用官方默认 30m，返回未拆分写入明细时明确记录该假设。预检图像 token 使用保守启发式，非官方精确分词；估算与实际供应商账单分开，禁止隐式付费重试。
+
 ### P2-B1：新 Quick-A 任务直接制作
 
 运营在原 Workspace 创建任务、上传商品与参考、绑定图位、选择输出像素尺寸及可选要求后，点击“生成一张候选”即可启动；不需要开发者预先运行 C01～C05 CLI，也不增加完整 Listing、Planning 人工预审或费用审批弹窗。

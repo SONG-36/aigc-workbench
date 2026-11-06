@@ -11,7 +11,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from .c01_context import C01Error, canonical, fingerprint, now
-from .c01_model import MODEL as UNDERSTANDING_MODEL, OpenAIResponsesTransport, credential_status
+from .c01_model import OpenAIResponsesTransport, credential_status
 from .c01_real import C01RealService
 from .c06_candidates import CandidateStore, private_write
 from .file_storage import inspect_image
@@ -140,13 +140,13 @@ class C06Service(C01RealService):
     def _current_decision_sources(self, decision_id, directory):
         from .quick_a_sources import usable_run
         service = QuickACreationDecisionService(self.settings, self.service, workspace=True, test_mode=self.test_mode)
-        flight = service.preflight(decision_id, UNDERSTANDING_MODEL)
-        snapshot = flight['snapshot']
         expected = self.settings.data_dir / 'creation_decisions' / decision_id.hex
         if archived_path(self.settings, directory).resolve() != expected.resolve():
             raise C01Error('C06_HANDOFF_MISMATCH', 'SOURCE_SELECTION', '当前任务交接位置不一致。')
         handoff = json.loads((expected / '05_C06_EXECUTION_HANDOFF.json').read_text())
         run = self.store.inspect(UUID(handoff['decision_run_id']))
+        flight = service.preflight(decision_id, run['requested_model'], run['planned_model_input']['max_output_tokens'])
+        snapshot = flight['snapshot']
         decision = run['structured_output']['content']['02_IMAGE_CREATION_DECISION']
         prompt = decision['C06_creation_input']
         if (run['snapshot_id'] != str(decision_id) or run['snapshot_sha256'] != fingerprint(snapshot)

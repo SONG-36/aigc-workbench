@@ -8,7 +8,7 @@ from uuid import UUID
 from .application import TaskNotFound
 from .c01_context import C01Error, fingerprint
 from .c01_execution import C01Service
-from .c01_model import authorize, MODEL as UNDERSTANDING_MODEL
+from .c01_model import authorize, DEFAULT_UNDERSTANDING_MODEL as UNDERSTANDING_MODEL
 from .c01_model_store import C01ModelStore
 from .c01_persistence import C01EvidenceStore
 from .c06_candidates import CandidateStore

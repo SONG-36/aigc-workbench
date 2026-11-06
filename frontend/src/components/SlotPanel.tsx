@@ -4,7 +4,7 @@ import { configureSlot, createSlot } from '../api/tasks'
 import type { WriteAction } from '../hooks/useWriteAction'
 import { OUTPUT_SIZES, type ImageSlot, type OutputSize, type SlotKind, type TaskDraft } from '../types'
 
-const kinds: [SlotKind, string][] = [
+export const SLOT_KINDS: [SlotKind, string][] = [
   ['main', '主图'], ['comparison', '同类商品对比图'], ['selling_point', '卖点图'], ['scene', '使用场景图'],
 ]
 
@@ -90,7 +90,7 @@ export function SlotPanel({ task, write, onSaved, onDirty }: {
       </div></div>
       {group('comparison', '同类商品对比图')}
     </div>
-    {kinds.filter(([kind]) => kind === 'selling_point' || kind === 'scene')
+    {SLOT_KINDS.filter(([kind]) => kind === 'selling_point' || kind === 'scene')
       .map(([kind, label]) => group(kind, label))}
   </section>
 }
