@@ -1,0 +1,8 @@
+# Server-private config, separate from any existing tunnel config.
+tunnel: REPLACE_WITH_NEW_TUNNEL_UUID
+credentials-file: /Users/andy_server/.cloudflared/REPLACE_WITH_NEW_TUNNEL_UUID.json
+metrics: 127.0.0.1:20242
+ingress:
+  - hostname: studio-demo.enterprise-ai-workspace.com
+    service: http://127.0.0.1:8040
+  - service: http_status:404
