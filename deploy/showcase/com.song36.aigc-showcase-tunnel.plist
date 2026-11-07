@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.song36.aigc-showcase-tunnel</string>
+  <key>ProgramArguments</key><array>
+    <string>/opt/homebrew/bin/cloudflared</string>
+    <string>tunnel</string><string>--config</string><string>__ROOT__/private/cloudflared.yml</string>
+    <string>--no-autoupdate</string><string>--loglevel</string><string>info</string>
+    <string>--output</string><string>json</string><string>run</string><string>__TUNNEL_UUID__</string>
+  </array>
+  <key>WorkingDirectory</key><string>__ROOT__</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>__ROOT__/logs/tunnel.log</string>
+  <key>StandardErrorPath</key><string>__ROOT__/logs/tunnel-error.log</string>
+</dict></plist>
