@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
     "test": "vitest run",
-    "preview": "vite preview --host 127.0.0.1 --port 8021 --strictPort"
+    "preview": "vite preview --host 127.0.0.1 --port 8021 --strictPort",
+    "build:showcase": "npm run typecheck && vite build --config vite.showcase.config.ts && node scripts/verify-showcase.mjs",
+    "preview:showcase": "python3 -m http.server 8040 --bind 127.0.0.1 --directory dist-showcase"
   },
   "dependencies": {
     "react": "19.3.1",

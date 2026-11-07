@@ -14,3 +14,6 @@ __pycache__/
 /frontend/dist/
 /frontend/coverage/
 /frontend/.vite/
+
+# Independent public read-only static build
+/frontend/dist-showcase/

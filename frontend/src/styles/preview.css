@@ -1,0 +1,11 @@
+.overlay { position: fixed; inset: 0; z-index: 100; background: rgb(27 38 56 / 52%); display: grid; place-items: center; padding: 24px; }
+.overlay-panel { width: min(100%,1100px); max-height: calc(100dvh - 48px); overflow: auto; overscroll-behavior: contain; background: var(--color-surface); border-radius: var(--radius-panel); box-shadow: var(--shadow-floating); }
+.preview-header { position: sticky; top: 0; z-index: 1; padding: 16px 20px; border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+.preview-header button { flex-shrink: 0; }
+.preview-body { padding: 20px; }
+.preview-info, .preview-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.preview-info { color: var(--color-text-support); font-size: 13px; }
+.preview-actions { padding-top: 16px; border-top: 1px solid var(--color-border); }
+.overlay-panel h3 { margin: 0; }
+.full-image { display: block; width: 100%; height: auto; max-height: max(180px,calc(100dvh - 320px)); object-fit: contain; margin: 20px 0; }
+@media(max-width:800px) { .overlay { padding: 16px; } .overlay-panel { max-height: calc(100dvh - 32px); } .preview-body { padding: 16px; } .preview-header { padding: 14px 16px; } }
