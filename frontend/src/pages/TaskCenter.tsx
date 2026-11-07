@@ -37,7 +37,8 @@ export function TaskCenter() {
         {tasks.map(task => <article className="task-row" key={task.id}>
           <div className="task-thumbnail">{task.assets.find(a => a.role === 'product_image')
             ? <img src={task.assets.find(a => a.role === 'product_image')!.url} alt="" /> : <Icon name="image" />}</div>
-          <div className="task-info"><h3>{task.title}</h3><span className="pill pill--neutral">Quick-A</span><span className="muted">{task.status === 'draft' ? '任务草稿' : task.status} · {new Date(task.created_at).toLocaleString()}</span>
+          <div className="task-info"><div className="task-title-line"><h3><Link to={`/workspace/${task.id}`}>{task.title}</Link></h3><span className="pill pill--neutral">{task.status === 'draft' ? '任务草稿' : task.status}</span></div>
+            <p className="task-meta">Quick-A · <time dateTime={task.created_at}>{new Date(task.created_at).toLocaleString()}</time></p>
             <p className="muted">{task.assets.length} 张已保存素材 · {task.slots.filter(s=>!s.archived).length} 个图位</p></div>
           <Link className="secondary button-link" to={`/workspace/${task.id}`}><span>打开 / 继续任务</span><Icon name="arrow" /></Link>
         </article>)}

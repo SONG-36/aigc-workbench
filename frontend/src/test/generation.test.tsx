@@ -84,13 +84,41 @@ describe('Workspace candidate review and controlled C06 requests (no paid API)',
     expect(await screen.findByAltText('当前图位的已保存生成候选')).toHaveAttribute('src', candidate.url)
     expect(screen.getByAltText('实售商品来源')).toHaveAttribute('src', task.assets[0].url)
     await userEvent.click(screen.getByRole('button', { name: '放大查看候选原图' }))
-    expect(within(screen.getByRole('dialog')).getByAltText('生成候选 · 原始 PNG')).toHaveAttribute('src', candidate.url)
+    expect(within(screen.getByRole('dialog')).getByAltText('生成候选 · V1 · 原始 PNG')).toHaveAttribute('src', candidate.url)
     await userEvent.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     first.unmount(); mount()
     await screen.findByAltText('当前图位的已保存生成候选')
     expect(api.posts()).toHaveLength(0)
     expect(screen.queryByRole('button', { name: 'Pass' })).not.toBeInTheDocument()
+  })
+
+  it.each([false,true])('keeps original PNG viewing separate from effective Pass delivery (current=%s)',async current=>{
+    const shown={...candidate,review_status:current?'PASS':'PENDING',is_current_delivery:current,pass:current,operator_approved:current}
+    const passed={...candidate,image_version_id:'older-passed-version',review_status:'PASS',pass:true,operator_approved:true,
+      url:`/api/tasks/${task.id}/slots/main-slot/versions/older-passed-version/content`}
+    const delivery={id:'delivery-fixture',operation_id:'review-operation',task_id:task.id,slot_id:'main-slot',decision:'PASS',feedback:'',
+      image_version_id:current?candidate.image_version_id:passed.image_version_id,
+      url:`/api/tasks/${task.id}/slots/main-slot/delivery?review_id=delivery-fixture`,reviewer:'Unauthenticated label',reviewed_at:task.created_at,source:'EXPLICIT_OPERATOR'}
+    const api=server({...initial,state:'SUCCEEDED',candidates:current?[shown]:[shown,passed],delivery} as SlotWorkspace)
+    mount();const user=userEvent.setup(),trigger=await screen.findByRole('button',{name:'放大查看候选原图'})
+    await user.click(trigger)
+    const dialog=screen.getByRole('dialog',{name:`生成候选 · V${current?1:2} · 原始 PNG`})
+    expect(within(dialog).getByRole('link',{name:'查看生成的原始 PNG'})).toHaveAttribute('href',candidate.url)
+    const download=within(dialog).queryByRole('link',{name:'下载当前有效 Pass 图片'})
+    if(current)expect(download).toHaveAttribute('href',delivery.url)
+    else expect(download).not.toBeInTheDocument()
+    expect(document.body.style.overflow).toBe('hidden')
+    const close=within(dialog).getByRole('button',{name:'关闭'})
+    expect(close).toHaveFocus();await user.tab({shift:true})
+    expect(current?download:within(dialog).getByRole('link',{name:'查看生成的原始 PNG'})).toHaveFocus()
+    await user.tab();expect(close).toHaveFocus()
+    await user.click(within(dialog).getByRole('img'))
+    await user.tab();expect(close).toHaveFocus()
+    await user.click(within(dialog).getByRole('img'))
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();expect(trigger).toHaveFocus()
+    expect(document.body.style.overflow).not.toBe('hidden');expect(api.posts()).toHaveLength(0)
   })
 
   it('one manual click submits one command with no extra approval or budget fields', async () => {

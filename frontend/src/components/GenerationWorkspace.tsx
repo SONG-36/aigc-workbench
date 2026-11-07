@@ -9,9 +9,10 @@ import {executionPresentation,reviewName,versionName,type SlotPresentation} from
 
 function SlotOutput({task,slot,locked,draft,setDraft,onStatus}:{task:TaskDraft;slot:ImageSlot;locked:boolean;draft:RevisionDrafts;setDraft:(d:RevisionDrafts)=>void;onStatus?:(s:SlotPresentation)=>void}) {
  const generation=useSlotGeneration(task,slot)
- const [selected,setSelected]=useState(''),[viewer,setViewer]=useState<{url:string;title:string}|null>(null)
+ const [selected,setSelected]=useState(''),[viewer,setViewer]=useState<{url:string;title:string;versionId?:string}|null>(null)
  const {data,error,submitting,uncertain}=generation
  const candidate=data?.candidates.find(c=>c.image_version_id===selected)||data?.candidates[0]
+ const previewCandidate=data?.candidates.find(c=>c.image_version_id===viewer?.versionId)
  const ready=data?.readiness,latest=data?.executions[0],status=executionPresentation(data,candidate)
  useEffect(()=>{onStatus?.({...status,slotId:slot.id})},[onStatus,slot.id,status.label,status.tone])
  const sourceIds=candidate?[candidate.product_asset_id,candidate.reference_asset_id]:[ready?.product_asset_id,ready?.reference_asset_id||slot.reference_asset_id]
@@ -39,7 +40,7 @@ function SlotOutput({task,slot,locked,draft,setDraft,onStatus}:{task:TaskDraft;s
       {data.candidates.map(c=><option key={c.image_version_id} value={c.image_version_id}>{versionName(data.candidates,c.image_version_id)} · {reviewName(c.review_status)} · {new Date(c.created_at).toLocaleString()}</option>)}
      </select></label>
     </div>
-    <button className="candidate-image" aria-label="放大查看候选原图" onClick={()=>setViewer({url:candidate.url,title:'生成候选 · 原始 PNG'})}><img src={candidate.url} alt="当前图位的已保存生成候选"/></button>
+    <button className="candidate-image" aria-label="放大查看候选原图" onClick={()=>setViewer({url:candidate.url,title:`生成候选 · ${versionName(data.candidates,candidate.image_version_id)} · 原始 PNG`,versionId:candidate.image_version_id})}><img src={candidate.url} alt="当前图位的已保存生成候选"/></button>
     <div className="canvas-caption"><span>{candidate.image.width} × {candidate.image.height} · {new Date(candidate.created_at).toLocaleString()}</span><a href={candidate.url} target="_blank" rel="noreferrer"><Icon name="expand"/>打开原始 PNG</a></div>
     {candidate.postprocess==='LANCZOS_UPSCALE'&&<p className="notice">分辨率放大：模型原生 {candidate.model_generation_size} → 最终 {candidate.final_output_size}（LANCZOS 等比例，无裁切）。</p>}
     {candidate.execution_mode==='TEST_ONLY'&&<p className="notice">TEST_ONLY 候选 · 不可用于真实运营交付</p>}
@@ -63,7 +64,18 @@ function SlotOutput({task,slot,locked,draft,setDraft,onStatus}:{task:TaskDraft;s
    </details>
    <ExecutionDetails executions={data.executions}/>
   </>}
-  {viewer&&<Overlay title={viewer.title} onClose={()=>setViewer(null)}><img className="full-image" src={viewer.url} alt={viewer.title}/><a href={viewer.url} target="_blank" rel="noreferrer">新窗口查看原始文件</a></Overlay>}
+  {viewer&&<Overlay title={viewer.title} onClose={()=>setViewer(null)}>
+   {previewCandidate&&<div className="preview-info"><span className={`pill pill--${previewCandidate.review_status==='PASS'?'success':previewCandidate.review_status==='REJECT'?'danger':'neutral'}`}>{reviewName(previewCandidate.review_status)}</span>
+    <span>{previewCandidate.image.width} × {previewCandidate.image.height}</span><time dateTime={previewCandidate.created_at}>{new Date(previewCandidate.created_at).toLocaleString()}</time>
+    {previewCandidate.is_current_delivery&&<span>当前有效交付</span>}
+    {previewCandidate.execution_mode==='TEST_ONLY'&&<span>TEST_ONLY · 不可用于真实运营交付</span>}
+   </div>}
+   <img className="full-image" src={viewer.url} alt={viewer.title}/>
+   <div className="preview-actions"><a className="button-link" href={viewer.url} target="_blank" rel="noreferrer"><Icon name="expand"/>{previewCandidate?'查看生成的原始 PNG':'新窗口查看原始文件'}</a>
+    {previewCandidate?.is_current_delivery&&data?.delivery?.image_version_id===previewCandidate.image_version_id&&<a className="button-link" href={data.delivery.url}><Icon name="download"/>{data.delivery.source==='TEST_REVIEW'?'下载 TEST_ONLY 测试 PNG':'下载当前有效 Pass 图片'}</a>}
+   </div>
+   {previewCandidate&&!previewCandidate.is_current_delivery&&<p className="muted">此版本不是当前有效交付；原始 PNG 供查看，不代表已通过审核。</p>}
+  </Overlay>}
  </div>
 }
 

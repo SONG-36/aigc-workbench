@@ -23,15 +23,18 @@ export function TaskForm(){
  const form=useNewQuickATask(),{draft,files,task,busy,hydrating,error}=form
  const saved=(id:string|null)=>task?.assets.find(a=>a.id===id)
  return <form onSubmit={e=>{e.preventDefault();void form.save()}} className="draft-form">
+  <nav className="form-jump-links" aria-label="新建任务页内导航"><a href="#task-materials">商品素材</a><a href="#slot-references">图位参考</a><a href="#overall-requirements">整体要求</a><a href="#save-task">前往保存<Icon name="arrow"/></a></nav>
   {draft.started&&<p className="notice">恢复同一次保存；已保存身份与文件会跳过，未完成输入仍保留，不自动提交。</p>}
-  <section className="form-section"><div className="section-head"><div className="section-title"><span className="section-number">01</span><h3>任务与商品素材</h3></div><span className="muted">真实商品是外观依据</span></div>
+  <section id="task-materials" className="form-section"><div className="section-head"><div className="section-title"><span className="section-number">01</span><h3>任务与商品素材</h3></div><span className="muted">真实商品是外观依据</span></div>
+   <div className="task-material-layout">
    <div className="task-name-field"><label htmlFor="task-title">任务名称</label><input id="task-title" value={draft.title} required maxLength={120} disabled={busy||draft.started}
     onChange={e=>form.edit({title:e.target.value})} placeholder="例如：汽车电路检测仪 · 营销主图"/></div>
    <div className="product-draft"><label>实际商品图片</label><DraftImage label="商品图片" file={files.product} saved={saved(draft.productId)} expectedName={draft.productInfo?.name}
     disabled={!form.canChoose('product')} onChange={file=>form.choose('product',file)}/></div>
+   </div>
   </section>
-  <section className="form-section"><div className="section-head"><div className="section-title"><span className="section-number">02</span><h3>图位与营销参考</h3></div></div>
-   <p className="muted">在每个图位直接上传对应参考，保存时自动绑定；无需共享参考素材池。</p>
+  <section id="slot-references" className="form-section"><div className="section-head"><div className="section-title"><span className="section-number">02</span><h3>图位与营销参考</h3></div></div>
+   <p className="muted">在对应图位上传参考，保存时自动绑定。</p>
    <div className="slot-grid">{draft.slots.map(slot=>{const label=slotTitle(slot.kind,slot.ordinal),file=files.references?.[slot.key]||null
     return <fieldset className="slot-shell" key={slot.key} data-draft-slot-id={slot.key} data-slot-kind={slot.kind}>
      <legend>{label}</legend>
@@ -51,7 +54,7 @@ export function TaskForm(){
    <div className="actions"><button type="button" disabled={busy||draft.started} onClick={()=>form.addSlot('selling_point')}>＋ 添加卖点图</button>
     <button type="button" disabled={busy||draft.started} onClick={()=>form.addSlot('scene')}>＋ 添加使用场景图</button></div>
   </section>
-  <section className="form-section"><div className="section-title"><span className="section-number">03</span><h3>整体运营要求</h3><span className="muted">可选</span></div>
+  <section id="overall-requirements" className="form-section"><div className="section-title"><span className="section-number">03</span><h3>整体运营要求</h3><span className="muted">可选</span></div>
    <label>作用于整个任务<textarea aria-label="整体运营要求" rows={3} maxLength={2000} value={draft.overallRequirements} disabled={busy||draft.started}
     onChange={e=>form.edit({overallRequirements:e.target.value})} placeholder="例如：所有图片采用简洁蓝白设计，保持商品外观与附件完整。"/></label>
    <p className="muted">作用于本任务全部图位的后续生成和显式修改；不自动重做或使已有 Pass 失效。空整体要求合法。</p>
@@ -60,7 +63,7 @@ export function TaskForm(){
   {error&&<p role="alert" className="error">{error.stage}失败：{error.message}{error.unknown?' 结果尚未确认；继续保存复用原操作身份。':' 未完成文件与输入仍保留。'}</p>}
   {task&&error&&<p><Link to={`/workspace/${task.id}`}>打开已保存部分，核对尚未完成的资料</Link></p>}
   <div className="form-submit-bar"><p>保存任务、原始素材与图位配置。此操作不会调用模型。</p>
-   <button type="submit" className="primary" disabled={busy||hydrating}>{busy?'正在保存任务和资料…':error?'继续保存任务和资料':'保存任务和资料，进入工作台'}<Icon name="arrow"/></button>
+   <button id="save-task" type="submit" className="primary" disabled={busy||hydrating}>{busy?'正在保存任务和资料…':error?'继续保存任务和资料':'保存任务和资料，进入工作台'}<Icon name="arrow"/></button>
   </div>
  </form>
 }
