@@ -12,8 +12,8 @@ it('binds each image approval to exact bytes and refuses changed, missing or sym
   try {
     const bytes=Buffer.from('TEST_ONLY build guard fixture'),file='test-only.png'
     const sha256=createHash('sha256').update(bytes).digest('hex')
-    const image={file,sha256,authorizationStatus:'APPROVED_FOR_PUBLIC_SHOWCASE',approvalRecord:'TEST_ONLY',alt:'TEST_ONLY',caption:'TEST_ONLY'}
-    const cases=parseManifest({cases:[{slug:'test-only',title:'TEST_ONLY',productCategory:'TEST_ONLY',description:'TEST_ONLY',displayOrder:0,
+    const image={file,sha256,authorizationStatus:'OPERATOR_APPROVED_FOR_PUBLIC_SHOWCASE',approvalRecord:'TEST_ONLY',alt:'TEST_ONLY',caption:'TEST_ONLY'}
+    const cases=parseManifest({cases:[{slug:'test-only',title:'TEST_ONLY',productCategory:'TEST_ONLY',description:'TEST_ONLY',displayOrder:0,approvalDate:'2026-11-07',rightsReview:'NEEDS_RIGHTS_REVIEW',rightsNotice:'TEST_ONLY',
       approvalRecord:'TEST_ONLY',clearance:{confidentiality:true,publication:true},resultReview:'HUMAN_PASSED',images:{product:image,result:image}}]})
     expect(()=>verifyApprovedAssets(cases,directory)).toThrow()
     writeFileSync(join(directory,file),bytes)

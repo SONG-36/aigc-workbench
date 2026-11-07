@@ -6,18 +6,18 @@ import {CaseGallery} from '../showcase/CaseGallery'
 import {publicCases} from '../showcase/content'
 import {parseManifest,resolveCases,type PublicCase} from '../showcase/manifest'
 
-const fixture:PublicCase={slug:'test-only',title:'TEST_ONLY · gallery fixture',productCategory:'TEST_ONLY 图形',displayOrder:1,versionLabel:'TEST_ONLY V2',humanReviewLabel:'TEST_ONLY 审核标签',description:'组件验收图形，不是真实商品案例。',
+const fixture:PublicCase={slug:'test-only',title:'TEST_ONLY · gallery fixture',productCategory:'TEST_ONLY 图形',approvalDate:'2026-11-07',rightsReview:'NEEDS_RIGHTS_REVIEW',rightsNotice:'TEST_ONLY 权利待复核',displayOrder:1,versionLabel:'TEST_ONLY V2',humanReviewLabel:'TEST_ONLY 审核标签',description:'组件验收图形，不是真实商品案例。',
   images:{product:{src:'./test-product.png',alt:'TEST_ONLY 商品图形',caption:'TEST_ONLY product'},
     reference:{src:'./test-reference.png',alt:'TEST_ONLY 参考图形',caption:'TEST_ONLY reference'},
     result:{src:'./test-result.png',alt:'TEST_ONLY 成果图形',caption:'TEST_ONLY result'}}}
-const spec=()=>({slug:'test-only',title:'TEST_ONLY',productCategory:'TEST_ONLY',displayOrder:1,description:'TEST_ONLY',approvalRecord:'TEST_ONLY_UNIT_FIXTURE',
+const spec=()=>({slug:'test-only',title:'TEST_ONLY',productCategory:'TEST_ONLY',approvalDate:'2026-11-07',rightsReview:'NEEDS_RIGHTS_REVIEW',rightsNotice:'TEST_ONLY 权利待复核',displayOrder:1,description:'TEST_ONLY',approvalRecord:'TEST_ONLY_UNIT_FIXTURE',
   clearance:{confidentiality:true,publication:true},resultReview:'HUMAN_PASSED',
-  images:Object.fromEntries(['product','reference','result'].map(role=>[role,{file:`test-${role}.png`,sha256:'a'.repeat(64),authorizationStatus:'APPROVED_FOR_PUBLIC_SHOWCASE',approvalRecord:'TEST_ONLY_UNIT_FIXTURE',alt:`TEST_ONLY ${role}`,caption:'TEST_ONLY'}]))})
+  images:Object.fromEntries(['product','reference','result'].map(role=>[role,{file:`test-${role}.png`,sha256:'a'.repeat(64),authorizationStatus:'OPERATOR_APPROVED_FOR_PUBLIC_SHOWCASE',approvalRecord:'TEST_ONLY_UNIT_FIXTURE',alt:`TEST_ONLY ${role}`,caption:'TEST_ONLY'}]))})
 
 it('runs the public page without fetch, uploads, business commands or internal links; shows honest pending cases',async()=>{
   const fetch=vi.fn(()=>{throw Error('Public page must not call an API')});vi.stubGlobal('fetch',fetch)
-  expect(publicCases).toEqual([])
-  render(<Showcase cases={publicCases}/>);const user=userEvent.setup()
+  expect(publicCases).toHaveLength(1);expect(publicCases[0].rightsReview).toBe('NEEDS_RIGHTS_REVIEW')
+  render(<Showcase cases={[]}/>);const user=userEvent.setup()
   expect(screen.getByRole('heading',{level:1})).toHaveTextContent('从真实商品出发')
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
   expect(document.querySelector('input[type=file],form')).toBeNull()
@@ -36,6 +36,7 @@ it('runs the public page without fetch, uploads, business commands or internal l
 
 it('switches all local cleared images, supports keyboard selection, zoom and focus return without network commands',async()=>{
   const fetch=vi.fn();vi.stubGlobal('fetch',fetch);render(<CaseGallery entry={fixture}/>);const user=userEvent.setup()
+  await user.click(screen.getByRole('tab',{name:'商品原图'}))
   expect(screen.getByAltText('TEST_ONLY 商品图形')).toHaveAttribute('src','./test-product.png')
   await user.click(screen.getByRole('tab',{name:'营销参考'}));await user.keyboard('{End}')
   expect(screen.getByAltText('TEST_ONLY 成果图形')).toHaveAttribute('src','./test-result.png')
@@ -47,11 +48,12 @@ it('switches all local cleared images, supports keyboard selection, zoom and foc
 
 it('shows an honest image error without retrying or substituting a different result',async()=>{
   render(<CaseGallery entry={fixture}/>);const user=userEvent.setup()
+  await user.click(screen.getByRole('tab',{name:'商品原图'}))
   fireEvent.error(screen.getByAltText('TEST_ONLY 商品图形'))
-  expect(screen.getByRole('alert')).toHaveTextContent('图片暂时无法显示')
+  expect(within(screen.getByRole('tabpanel')).getByRole('alert')).toHaveTextContent('图片暂时无法显示')
   expect(screen.queryByRole('button',{name:'放大商品原图'})).not.toBeInTheDocument()
   await user.click(screen.getByRole('tab',{name:'营销参考'}));expect(screen.getByAltText('TEST_ONLY 参考图形')).toBeInTheDocument()
-  await user.click(screen.getByRole('tab',{name:'商品原图'}));expect(screen.getByRole('alert')).toBeInTheDocument()
+  await user.click(screen.getByRole('tab',{name:'商品原图'}));expect(screen.getAllByRole('alert').length).toBeGreaterThan(0)
 })
 
 it('supports two images without exposing a reference tab and wraps keyboard focus over the actual roles',async()=>{
@@ -95,7 +97,7 @@ it.each(['product','reference','result'])('rejects pending or prohibited %s even
 it('allows an omitted reference only; resolves exact local assets in display order without publishing approval metadata',()=>{
   const two=spec();delete two.images.reference
   const three={...spec(),slug:'three-images',displayOrder:0}
-  const assets=Object.fromEntries(['product','reference','result'].map(role=>[`./assets/approved/test-${role}.png`,`./${role}.png`]))
+  const assets=Object.fromEntries(['product','reference','result'].map(role=>[`test-${role}.png`,`./${role}.png`]))
   const cases=resolveCases(parseManifest({cases:[two,three]}),assets)
   expect(cases.map(c=>c.slug)).toEqual(['three-images','test-only'])
   expect(cases[1].images.reference).toBeUndefined();expect(cases[1].images.result.src).toBe('./result.png')
@@ -123,4 +125,25 @@ it('does not equate internal Pass with public permission or accept private field
     expect(()=>parseManifest({cases:[changed]})).toThrow()
   }
   expect(()=>resolveCases(parseManifest({cases:[item]}),{})).toThrow('缺少对应的本地图片')
+})
+
+it('shows all three inputs/results together and starts with the result without claiming legal clearance',async()=>{
+  const fetch=vi.fn();vi.stubGlobal('fetch',fetch);render(<CaseGallery entry={fixture}/>);const user=userEvent.setup()
+  expect(screen.getByLabelText('真实案例三图对照')).toBeInTheDocument()
+  expect(screen.getByRole('tab',{name:'生成成果'})).toHaveAttribute('aria-selected','true')
+  expect(screen.getByText('运营批准展示')).toBeInTheDocument()
+  expect(screen.getByText(/运营批准日期：2026-11-07/)).toHaveTextContent('权利待复核')
+  for(const name of ['商品原图','营销参考','生成成果']) {
+    const button=screen.getByRole('button',{name:`放大对照中的${name}`});await user.click(button)
+    expect(screen.getByRole('dialog')).toHaveAccessibleName(`TEST_ONLY · gallery fixture · ${name}`)
+    await user.keyboard('{Escape}');expect(button).toHaveFocus()
+  }
+  expect(fetch).not.toHaveBeenCalled()
+})
+
+it('requires the operator-specific approval and an honest rights review notice',()=>{
+  for(const change of [{rightsReview:'LEGALLY_VERIFIED'},{rightsNotice:''},{approvalDate:''}])
+    expect(()=>parseManifest({cases:[{...spec(),...change}]})).toThrow()
+  const item=spec();item.images.reference.authorizationStatus='APPROVED_FOR_PUBLIC_SHOWCASE'
+  expect(()=>parseManifest({cases:[item]})).toThrow()
 })

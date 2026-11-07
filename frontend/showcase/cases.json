@@ -1,3 +1,48 @@
 {
-  "cases": []
+  "cases": [
+    {
+      "slug": "black-device-marketing-image",
+      "title": "从黑色商品原图，到竖版营销主图",
+      "productCategory": "商品营销主图",
+      "description": "提供实际商品图和同款营销参考，结合图位要求形成制作决定，生成候选后由人工审核。这里展示的是已 Pass 的真实版本。",
+      "versionLabel": "竖版 · 1024 × 1536",
+      "humanReviewLabel": "人工 Pass · 当前有效交付",
+      "displayOrder": 0,
+      "approvalDate": "2026-11-07",
+      "rightsReview": "NEEDS_RIGHTS_REVIEW",
+      "rightsNotice": "三张素材已获运营批准展示；第三方车辆照片、徽标等权利尚待独立复核。图中文字与参数仅为原案例内容，不代表本页独立认证。",
+      "approvalRecord": "D05-C01-OPERATOR-20261107",
+      "clearance": {
+        "confidentiality": true,
+        "publication": true
+      },
+      "resultReview": "HUMAN_PASSED",
+      "images": {
+        "product": {
+          "file": "c01-product.jpg",
+          "sha256": "cf304828c8204114c3a71aa69990d22848378b5a50b9330ad66900c2e0d3e554",
+          "authorizationStatus": "OPERATOR_APPROVED_FOR_PUBLIC_SHOWCASE",
+          "approvalRecord": "D05-C01-OPERATOR-20261107",
+          "alt": "白底商品原图：黑色主机、顶部探针、红黑夹、蓝色连接件和独立黑色附件",
+          "caption": "实际商品输入：商品主体与附件的外观依据。原始文件，未裁剪或修饰。"
+        },
+        "reference": {
+          "file": "c01-reference.png",
+          "sha256": "d292fa625dfd4f86fa43ee0407dde9ead69dadd83a3b6ec1d8a903227ead4155",
+          "authorizationStatus": "OPERATOR_APPROVED_FOR_PUBLIC_SHOWCASE",
+          "approvalRecord": "D05-C01-OPERATOR-20261107",
+          "alt": "同款营销参考：蓝色主机、三组车型卡片及蓝白营销版式",
+          "caption": "营销与设计参考：提供版式、文字及车型卡片。参考中的蓝色主机不作为实售外观。"
+        },
+        "result": {
+          "file": "c01-result.png",
+          "sha256": "314b87d2eaad77e539df1a6f2a0bbf96ca6db5478a8da55fc3e75b0df61d1e02",
+          "authorizationStatus": "OPERATOR_APPROVED_FOR_PUBLIC_SHOWCASE",
+          "approvalRecord": "D05-C01-OPERATOR-20261107",
+          "alt": "人工 Pass 的竖版 AI 候选：黑色商品主体、主要附件和车型营销信息",
+          "caption": "真实 AI 生成成果：已人工 Pass，当前有效交付。图中参数沿用业务输入，未在此独立验证。"
+        }
+      }
+    }
+  ]
 }

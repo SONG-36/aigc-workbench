@@ -18,18 +18,18 @@ npm run preview:showcase
 
 ## 公开素材状态
 
-目前 `cases.json` 的案例列表为空。现有业务图片的人工 Pass 不能证明商品、参考素材的再发布权限或保密审查已完成，因此本版本没有复制任何商业图片或内部工作台截图。
+`cases.json` 目前仅登记 D05-C01 的三张确切图片。用户于 2026-11-07 分别批准商品、参考和成果用于展示，记录为 `OPERATOR_APPROVED_FOR_PUBLIC_SHOWCASE`；见 [运营批准记录](./reviews/c01-20261107.md)。这不代表独立法律审核完成。车辆照片、徽标及潜在第三方限制保留 `NEEDS_RIGHTS_REVIEW`，页面明确提示。本轮只准备本地人工视觉审核，未执行公网发布。
 
-页面展示明确的待授权占位。布局图是本项目原创的界面结构示意，不是真实任务或生成成果；品牌图标复用现有界面图形。测试中的 TEST_ONLY 图形不会进入发布产物。
+图库展示实际商品、营销参考和人工 Pass 成果，三图并列对照，成果默认作为大图重点；窄屏按来源顺序纵向排列。没有获准案例时仍显示待授权占位。布局图是本项目原创界面示意，测试中的 TEST_ONLY 图形不会进入发布产物。
 
 增加真实案例前，必须逐项核查商品、参考、成果使用许可、保密范围、明确发布授权及成果人工审核，并保存可复核依据。不要只填写布尔值来代替实际核查。
 
 经明确许可后：
 
-1. 只将获准图片复制到 `src/showcase/assets/approved/`，使用描述性的公开文件名（PNG、JPEG、WebP）。不要用内部 Task、Run、Asset ID 命名。
+1. 只将获准图片的原始字节复制到 Git 忽略的 `frontend/.showcase-assets/approved/`，使用描述性的公开文件名（PNG、JPEG、WebP）。不要用内部 Task、Run、Asset ID 命名。目录不随 Git 提交；新检出环境须先取得这三张获准文件，缺失或哈希不符时构建停止，不以其他图片替代。
 2. 在 `cases.json` 中登记公开 `slug`、`title`、`productCategory`、`description` 和非负整数 `displayOrder`。可选 `versionLabel`、`humanReviewLabel` 只能描述真实的版本与人工审核状态。
-3. `images.product` 和 `images.result` 必须存在；`images.reference` 可省略。每张实际发布的图片分别登记 `file`、64 位小写 `sha256`、准确的 `alt`、`caption`、`authorizationStatus: "APPROVED_FOR_PUBLIC_SHOWCASE"` 和可公开的 `approvalRecord`。构建会核对文件字节与授权清单中的哈希，文件替换后必须重新审核。不得填写待授权或禁止公开的素材。
-4. 案例层的 `clearance.confidentiality/publication` 均须为 `true`，`resultReview` 为 `HUMAN_PASSED`，`approvalRecord` 记录案例发布依据。授权编号不能包含姓名、内部记录 ID 或保密资料；编号和字段值不是许可证明，原始依据仍须私下留存、人工复核。
+3. `images.product` 和 `images.result` 必须存在；`images.reference` 可省略。每张实际发布的图片分别登记 `file`、64 位小写 `sha256`、准确的 `alt`、`caption`、`authorizationStatus: "OPERATOR_APPROVED_FOR_PUBLIC_SHOWCASE"` 和可公开的 `approvalRecord`。构建核对文件字节与清单哈希，替换后必须重新审核。不得填写未获运营批准或禁止公开的素材。
+4. 案例层 `clearance.confidentiality/publication` 分别记录本地可见隐私／保密检查和运营展示批准，均不得解释为独立法律许可。`resultReview` 须为 `HUMAN_PASSED`，`approvalRecord` 记录批准依据；`approvalDate` 记录日期，`rightsReview: "NEEDS_RIGHTS_REVIEW"` 和 `rightsNotice` 明示未完成的权利核查。授权编号不能包含姓名、内部记录 ID 或保密资料；原始依据仍须私下留存、人工复核。
 5. 若参考图不能公开，可以仅展示商品和成果，但两者须分别获准公开，并检查成果中是否包含未经许可的第三方照片、商标或其他内容。省略参考图不能消除成果自身的权利缺口。
 6. 重新检查文字、图内信息和文件元数据。构建必须通过；未列入清单的图片、哈希不符、缺失许可、外部 URL、路径穿越、额外私有字段均不得发布。
 
@@ -39,7 +39,9 @@ npm run preview:showcase
 
 图库沿用原有标签切换和弹窗，支持商品／参考／成果三图，以及商品／成果两图。未公开参考的案例不显示参考标签；图片保持原始比例，支持方向键、Home/End、Escape 关闭和焦点恢复。没有获准案例时继续显示授权待确认空态。
 
-公开清单仍为空。自动化测试使用明确的 `TEST_ONLY` 图形或临时数据，不代表真实案例或授权；不进入发布产物。本轮只完成本地准备，不更新 Mac mini、Tunnel、Pages 或正式公网素材。后续由运营者按具体文件及哈希确认公开范围后，再单独安排发布。
+D05-01 的私有候选报告保留当时状态；D05-02 新增独立批准及复核记录，不回写历史报告或业务数据库。C02～C04 仍未获准，不能因原图字节相同而扩大到其他案例或生成版本。自动化测试使用明确的 `TEST_ONLY` URL／图形，不读取商业图片；真实构建另行校验实际文件。
+
+构建通过虚拟静态模块仅注入 manifest 列明且哈希匹配的文件，不扫描或复制整个私有素材目录。构建结果可以独立运行，不动态读取任务、Asset 或数据库。本轮不更新 Mac mini、Tunnel、Pages 或正式公网素材，后续发布仍需单独操作。
 
 ## 隔离检查
 

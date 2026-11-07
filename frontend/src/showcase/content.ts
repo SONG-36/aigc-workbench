@@ -1,10 +1,8 @@
 import manifest from '../../showcase/cases.json'
 import {parseManifest,resolveCases} from './manifest'
+import assets from 'virtual:showcase-assets'
 
-// Only this curated directory can supply public case images. No runtime paths.
-const assets = import.meta.glob<string>('./assets/approved/*.{png,jpg,jpeg,webp}', {
-  eager: true, query: '?url', import: 'default',
-})
+// The build injects only exact manifest entries from the ignored publishing directory.
 export const publicCases = resolveCases(parseManifest(manifest),assets)
 
 export const workflow = [

@@ -14,8 +14,8 @@ assert.equal(report.publicCases,manifest.cases.length)
 const hash=data=>createHash('sha256').update(data).digest('hex')
 const allowedImages=new Set([hash(await readFile(resolve(root,'showcase/favicon.svg')))])
 for(const entry of manifest.cases)for(const image of Object.values(entry.images)) {
-  assert.equal(image.authorizationStatus,'APPROVED_FOR_PUBLIC_SHOWCASE')
-  const digest=hash(await readFile(resolve(root,'src/showcase/assets/approved',image.file)))
+  assert.equal(image.authorizationStatus,'OPERATOR_APPROVED_FOR_PUBLIC_SHOWCASE')
+  const digest=hash(await readFile(resolve(root,'.showcase-assets/approved',image.file)))
   assert.equal(digest,image.sha256,'Approved source bytes changed: '+image.file)
   allowedImages.add(digest)
 }

@@ -8,23 +8,37 @@ import {verifyApprovedAssets} from './showcase/verify-assets.ts'
 
 const frontend = dirname(fileURLToPath(import.meta.url))
 const source = resolve(frontend,'src/showcase')
+const approvedDirectory = resolve(frontend,'.showcase-assets/approved')
+const assetModule = '\0showcase-approved-assets'
 const shared = new Set(['components/Icon.tsx','components/ImageOverlay.tsx','styles/tokens.css','styles/base.css','styles/preview.css']
   .map(name=>resolve(frontend,'src',name)))
 
 function publicOnly():Plugin {
   return {
     name:'showcase-public-only',
+    resolveId(id) { if(id==='virtual:showcase-assets')return assetModule },
+    load(id) {
+      if(id!==assetModule)return
+      const cases = parseManifest(JSON.parse(readFileSync(resolve(frontend,'showcase/cases.json'),'utf8')))
+      const files = [...verifyApprovedAssets(cases,approvedDirectory)]
+      return files.map((file,index)=>`import image${index} from ${JSON.stringify(resolve(approvedDirectory,file)+'?url')};`).join('\n')
+        + '\nexport default {'+files.map((file,index)=>`${JSON.stringify(file)}:image${index}`).join(',')+'};'
+    },
     generateBundle() {
       const cases = parseManifest(JSON.parse(readFileSync(resolve(frontend,'showcase/cases.json'),'utf8')))
-      const approved = verifyApprovedAssets(cases,resolve(source,'assets/approved'))
+      const approved = verifyApprovedAssets(cases,approvedDirectory)
       const modules:string[] = []
       for(const id of this.getModuleIds()) {
         if(id.startsWith('\0'))continue
         const file=id.split('?')[0]
         if(file.includes('/node_modules/'))continue
+        if(file.startsWith(approvedDirectory+'/')) {
+          if(!approved.has(basename(file)))this.error('Unapproved public image import: '+basename(file))
+          modules.push('approved-image:'+basename(file));continue
+        }
         const own = file.startsWith(source+'/') || file.startsWith(resolve(frontend,'showcase')+'/')
         if(!own&&!shared.has(file))this.error('Showcase must not import internal application modules: '+relative(frontend,file))
-        if(file.startsWith(source+'/assets/')&&(!file.startsWith(source+'/assets/approved/')||!approved.has(basename(file))))
+        if(file.startsWith(source+'/assets/'))
           this.error('Unapproved public image import: '+basename(file))
         modules.push(relative(frontend,file))
       }
