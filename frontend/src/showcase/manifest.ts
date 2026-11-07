@@ -4,40 +4,62 @@ export const imageLabels: Record<ImageRole, string> = {
   product: '商品原图', reference: '营销参考', result: '生成成果',
 }
 export interface PublicImage { src: string; alt: string; caption: string }
-export interface PublicCase {
-  slug: string; title: string; description: string
-  images: Record<ImageRole, PublicImage>
+export type CaseImages<T> = { product: T; reference?: T; result: T }
+interface CaseDetails {
+  slug: string; title: string; productCategory: string; description: string
+  versionLabel?: string; humanReviewLabel?: string; displayOrder: number
 }
-export interface ApprovedCaseSpec {
-  slug: string; title: string; description: string
+export interface PublicCase extends CaseDetails {
+  images: CaseImages<PublicImage>
+}
+export interface ApprovedImageSpec {
+  file: string; sha256: string; alt: string; caption: string
+  authorizationStatus: 'APPROVED_FOR_PUBLIC_SHOWCASE'; approvalRecord: string
+}
+export interface ApprovedCaseSpec extends CaseDetails {
   approvalRecord: string
-  clearance: { product: true; reference: true; result: true; confidentiality: true; publication: true }
+  clearance: { confidentiality: true; publication: true }
   resultReview: 'HUMAN_PASSED'
-  images: Record<ImageRole, { file: string; alt: string; caption: string }>
+  images: CaseImages<ApprovedImageSpec>
+}
+
+export function availableImageRoles(images: CaseImages<unknown>): ImageRole[] {
+  return imageRoles.filter(role => images[role] !== undefined)
 }
 
 /** Publication clearance is separate from an internal image Pass. Fail closed. */
 export function parseManifest(value: unknown): ApprovedCaseSpec[] {
-  if (!value || typeof value !== 'object' || !('cases' in value) || !Array.isArray(value.cases))
+  const record = (object: unknown): object is Record<string, unknown> => !!object && typeof object === 'object' && !Array.isArray(object)
+  if (!record(value) || !Array.isArray(value.cases))
     throw new Error('公开案例清单格式无效。')
   const keys = (object: object, allowed: string[]) => Object.keys(object).every(k=>allowed.includes(k))
   if (!keys(value,['cases'])) throw new Error('公开案例清单包含非公开字段。')
   const slugs = new Set<string>()
+  const files = new Map<string, string>()
   for (const item of value.cases) {
-    if (!item || typeof item !== 'object') throw new Error('公开案例记录无效。')
+    if (!record(item)) throw new Error('公开案例记录无效。')
     const text = (s: unknown): s is string => typeof s === 'string' && !!s.trim() && s.length <= 500
-    if (!keys(item,['slug','title','description','approvalRecord','clearance','resultReview','images'])
+    if (!keys(item,['slug','title','productCategory','description','versionLabel','humanReviewLabel','displayOrder','approvalRecord','clearance','resultReview','images'])
       || !text(item.slug) || !/^[a-z][a-z0-9-]{0,70}$/.test(item.slug) || slugs.has(item.slug)
-      || !text(item.title) || !text(item.description) || !text(item.approvalRecord)
+      || !text(item.title) || !text(item.productCategory) || !text(item.description) || !text(item.approvalRecord)
+      || !Number.isSafeInteger(item.displayOrder) || (item.displayOrder as number) < 0
+      || ['versionLabel','humanReviewLabel'].some(k => k in item && !text(item[k]))
       || item.resultReview !== 'HUMAN_PASSED'
-      || !['product','reference','result','confidentiality','publication'].every(k => item.clearance?.[k] === true))
+      || !record(item.clearance) || item.clearance.confidentiality !== true || item.clearance.publication !== true)
       throw new Error('公开案例缺少完整素材许可、保密核查、发布授权或人工审核。')
-    if (!keys(item.clearance,['product','reference','result','confidentiality','publication']) || !keys(item.images||{},[...imageRoles]))
+    if (!keys(item.clearance,['confidentiality','publication']) || !record(item.images) || !keys(item.images,[...imageRoles]))
       throw new Error('公开案例包含非公开字段。')
+    if (!item.images.product || !item.images.result) throw new Error('公开案例必须包含商品与成果。')
     for (const role of imageRoles) {
-      const image = item.images?.[role]
-      if (!image || !keys(image,['file','alt','caption']) || !text(image.file) || !/^[a-z][a-z0-9-]*\.(png|jpe?g|webp)$/.test(image.file)
-        || !text(image.alt) || !text(image.caption)) throw new Error('案例图片必须是描述清楚的本地已授权素材。')
+      if (role === 'reference' && !('reference' in item.images)) continue
+      const image = item.images[role]
+      if (!record(image) || !keys(image,['file','sha256','alt','caption','authorizationStatus','approvalRecord'])
+        || !text(image.file) || !/^[a-z][a-z0-9-]*\.(png|jpe?g|webp)$/.test(image.file)
+        || typeof image.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(image.sha256)
+        || image.authorizationStatus !== 'APPROVED_FOR_PUBLIC_SHOWCASE' || !text(image.approvalRecord)
+        || !text(image.alt) || !text(image.caption)) throw new Error('案例每张图片必须具有明确公开授权、文件哈希和图片说明。')
+      if (files.has(image.file) && files.get(image.file) !== image.sha256) throw new Error('同名公开素材的哈希不一致。')
+      files.set(image.file,image.sha256)
     }
     slugs.add(item.slug)
   }
@@ -45,11 +67,11 @@ export function parseManifest(value: unknown): ApprovedCaseSpec[] {
 }
 
 export function resolveCases(specs: ApprovedCaseSpec[], assets: Record<string,string>): PublicCase[] {
-  return specs.map(({slug,title,description,images}) => ({slug,title,description,
-    images: Object.fromEntries(imageRoles.map(role => {
-      const image = images[role], src = assets[`./assets/approved/${image.file}`]
+  return [...parseManifest({cases:specs})].sort((a,b)=>a.displayOrder-b.displayOrder).map(({slug,title,productCategory,description,versionLabel,humanReviewLabel,displayOrder,images}) => ({slug,title,productCategory,description,versionLabel,humanReviewLabel,displayOrder,
+    images: Object.fromEntries(availableImageRoles(images).map(role => {
+      const image = images[role]!, src = assets[`./assets/approved/${image.file}`]
       if (!src) throw new Error('已授权案例缺少对应的本地图片文件。')
       return [role,{src,alt:image.alt,caption:image.caption}]
-    })) as Record<ImageRole,PublicImage>,
+    })) as CaseImages<PublicImage>,
   }))
 }

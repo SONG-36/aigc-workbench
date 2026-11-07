@@ -3,7 +3,8 @@ import react from '@vitejs/plugin-react'
 import {readFileSync} from 'node:fs'
 import {dirname,resolve,relative,basename} from 'node:path'
 import {fileURLToPath} from 'node:url'
-import {parseManifest,imageRoles} from './src/showcase/manifest.ts'
+import {parseManifest} from './src/showcase/manifest.ts'
+import {verifyApprovedAssets} from './showcase/verify-assets.ts'
 
 const frontend = dirname(fileURLToPath(import.meta.url))
 const source = resolve(frontend,'src/showcase')
@@ -15,7 +16,7 @@ function publicOnly():Plugin {
     name:'showcase-public-only',
     generateBundle() {
       const cases = parseManifest(JSON.parse(readFileSync(resolve(frontend,'showcase/cases.json'),'utf8')))
-      const approved = new Set(cases.flatMap(c=>imageRoles.map(role=>c.images[role].file)))
+      const approved = verifyApprovedAssets(cases,resolve(source,'assets/approved'))
       const modules:string[] = []
       for(const id of this.getModuleIds()) {
         if(id.startsWith('\0'))continue

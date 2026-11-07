@@ -13,8 +13,12 @@ assert.equal(report.internalApplicationModules,0)
 assert.equal(report.publicCases,manifest.cases.length)
 const hash=data=>createHash('sha256').update(data).digest('hex')
 const allowedImages=new Set([hash(await readFile(resolve(root,'showcase/favicon.svg')))])
-for(const entry of manifest.cases)for(const image of Object.values(entry.images))
-  allowedImages.add(hash(await readFile(resolve(root,'src/showcase/assets/approved',image.file))))
+for(const entry of manifest.cases)for(const image of Object.values(entry.images)) {
+  assert.equal(image.authorizationStatus,'APPROVED_FOR_PUBLIC_SHOWCASE')
+  const digest=hash(await readFile(resolve(root,'src/showcase/assets/approved',image.file)))
+  assert.equal(digest,image.sha256,'Approved source bytes changed: '+image.file)
+  allowedImages.add(digest)
+}
 let files=0,images=0
 const staticFiles=new Set(['index.html','showcase-checks.json','_headers','404.html','robots.txt'])
 async function inspect(folder) {
