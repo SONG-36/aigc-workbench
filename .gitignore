@@ -17,3 +17,6 @@ __pycache__/
 
 # Independent public read-only static build
 /frontend/dist-showcase/
+
+# Local Cloudflare CLI project cache
+/.wrangler/

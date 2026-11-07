@@ -65,12 +65,22 @@ npm --prefix frontend run build:showcase
 确认账号和项目清单后，使用专门的 Showcase 项目。没有可复用项目时才创建；不得覆盖其他网站。以下名称须先核实可用：
 
 ```sh
-npm exec --yes --package wrangler@4.158.0 -- wrangler pages project create aigc-workbench-showcase --production-branch main
+npm exec --yes --package wrangler@4.158.0 -- wrangler pages project create aigc-workbench-showcase --production-branch main --force
 npm exec --yes --package wrangler@4.158.0 -- wrangler pages deploy frontend/dist-showcase --project-name aigc-workbench-showcase --branch d04-preview --commit-hash "$(git rev-parse HEAD)"
 npm exec --yes --package wrangler@4.158.0 -- wrangler pages deployment list --project-name aigc-workbench-showcase --json
 ```
 
+Wrangler 4.158.0 对尚不存在的项目会尝试委派到 Workers；经核对其实际实现，上述首次创建命令的 `--force` 只选择直接创建 Pages 项目，并非覆盖已有项目。项目已存在后不再使用该选项。本项目未授予 Workers 写权限，不改用 Workers 发布。Wrangler 产生的根目录 `.wrangler/` 是本地项目缓存，已精确忽略，不进入静态产物或 Git。
+
 `d04-preview` 与生产分支分离。记录 CLI 实际返回的 Deployment ID、不可变预览 URL、分支别名、提交 SHA 和逐文件 SHA-256；命令示例不证明部署已经成功。部署后通过外部 HTTPS、浏览器及网络记录核查页面、全部资源、安全头、未知路径、只读交互和无内部 API 请求。发布记录和截图可保存在忽略的本地 QA 目录，禁止包含认证信息。
+
+固定 `pages.dev` 入口通过 Pages 的 `main` 发布标签更新，不切换本地 Git 分支，也不 Push：
+
+```sh
+npm exec --yes --package wrangler@4.158.0 -- wrangler pages deploy frontend/dist-showcase --project-name aigc-workbench-showcase --branch main --commit-hash "$(git rev-parse HEAD)"
+```
+
+Pages 中的 `Production` 是平台环境标签，不代表商业展示内容已批准。
 
 ### 域名和发布状态
 
@@ -83,3 +93,19 @@ npm exec --yes --package wrangler@4.158.0 -- wrangler pages deployment list --pr
 预览部署的哈希 URL 不随后续发布变化。预览不适用 Pages 生产回滚按钮；需要恢复分支别名时，核对并重新上传上一份成功静态包到同一预览分支。生产发布（后续单独决定）可在 Pages → Deployments 对历史成功的**生产**部署使用 `Rollback to this deployment`。不可把预览部署当作生产回滚目标。停止本地预览使用 Ctrl-C；撤下公网预览须由持有人在独立 Pages 项目中操作，不影响内部工作台。
 
 官方依据：[Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/)、[响应头](https://developers.cloudflare.com/pages/configuration/headers/)、[404 行为](https://developers.cloudflare.com/pages/configuration/serving-pages/)、[预览](https://developers.cloudflare.com/pages/configuration/preview-deployments/)、[回滚限制](https://developers.cloudflare.com/pages/configuration/rollbacks/)。
+
+## 首次发布记录 — 2026-11-07
+
+- 状态：`PUBLIC TECHNICAL PREVIEW READY`。真实案例公开授权仍待确认，不是 `COMMERCIAL SHOWCASE FULLY READY`。
+- 项目：`aigc-workbench-showcase`，Direct Upload，无 Git Provider、环境变量、Functions 或数据绑定。
+- 发布产物来源提交：`9983238811132c758e61e76657ca68a91e3d739d`；本节是发布后记录，不改变已发布字节。
+- 固定技术预览：[aigc-workbench-showcase.pages.dev](https://aigc-workbench-showcase.pages.dev/)。
+- 当前固定入口 Deployment：`654f74be-753f-4997-ae34-1929b3bb85f6`，标签 `main`；[不可变部署地址](https://654f74be.aigc-workbench-showcase.pages.dev/)。
+- 首个分支预览 Deployment：`444fe16c-87a0-4a2a-ae49-a658d4faf119`；[不可变预览](https://444fe16c.aigc-workbench-showcase.pages.dev/)、[d04-preview 别名](https://d04-preview.aigc-workbench-showcase.pages.dev/)。初始 TLS 握手错误已在最终复查消失，四个 URL 均取得 HTTPS 200。
+- 静态包：8 个文件（`_headers` 由 Pages 解析，7 个文件作为资源上传），商业案例 0 个；唯一图片资源为原创品牌 SVG。首页 SHA-256：`534e62c8186dbaba34a2c998480157021b7dab5566accb113e02832e6fe723a1`。
+- 实测：MacBook 浏览器和 Mac mini 只读公网 GET 均成功；非本机环境的首页、JS、CSS、SVG、robots 及检查清单哈希均与发布包一致。未修改 Mac mini 配置或服务。
+- 浏览器：1440/1280/1024/768px、案例占位切换、方向键、布局放大与 Escape 焦点恢复通过；交互后仅 4 个同源静态 GET、全部 200，控制台 0 条消息。没有内部业务请求或付费执行。
+- 公开 HTTP 检查：静态资源字节及安全/缓存响应头通过；业务 API 和私有路径 GET 为 404，业务写入 POST 为 405。未上传环境文件、数据库、运行数据、商业素材、Prompt 或 Evidence。
+- 域名：Zone 中仍只有原来的两条记录，候选 `studio-demo` 无现有 DNS 记录；未配置自定义域名，未修改国金 DNS/Tunnel。
+- 回滚：首次建立独立项目，无更早的生产部署；上述两个成功部署均保留，当前成功生产部署作为后续回滚基线。本轮未执行生产回滚。
+- 本地证据：`.runtime/d04-pages-20261107T025610Z/` 内保留 HAR、响应检查、远端校验、截图、逐文件 SHA-256 和静态包；它们不进入 Git 或公网产物。静态包 SHA-256：`e6e1dbb8c2212b5a1b829096fa81a8efeaf8efbfb01df68203f4b1e2c1a85950`。
