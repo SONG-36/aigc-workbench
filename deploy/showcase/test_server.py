@@ -71,6 +71,17 @@ class ShowcaseOriginTests(unittest.TestCase):
         for path in ['/../private.sqlite', '/%2e%2e/private.sqlite', '/assets/../../private.sqlite', '/%5cetc/passwd', '/%00', '//index.html']:
             self.assertEqual(self.request(path)[0], 400, path)
 
+    def test_cases_entry_serves_the_same_verified_static_page_only(self):
+        status, headers, data = self.request('/cases')
+        self.assertEqual((status, data), (200, self.content['index.html']))
+        self.assertEqual(headers['X-Showcase-Release'], 'test-release')
+        self.assertIn("connect-src 'none'", headers['Content-Security-Policy'])
+        self.assertEqual(self.request('/cases', 'HEAD')[2], b'')
+        self.assertEqual(self.request('/cases', headers={'If-None-Match': headers['ETag']})[0], 304)
+        self.assertEqual(self.request('/cases', 'POST')[0], 405)
+        for path in ['/cases/api/tasks', '/cases/assets/private.png', '/cases/unknown']:
+            self.assertEqual(self.request(path)[0], 404, path)
+
     def test_all_write_methods_rejected_and_no_source_changes(self):
         before = {p: (self.root / p).read_bytes() for p in self.content}
         for method in ['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'TRACE', 'CONNECT']:

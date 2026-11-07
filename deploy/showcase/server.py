@@ -105,7 +105,7 @@ def create_server(root, manifest, release, host='127.0.0.1', port=8040):
                 return self.respond(421, path, head=head)
             if hostname == 'studio-demo.enterprise-ai-workspace.com' and self.headers.get('X-Forwarded-Proto') == 'http':
                 return self.respond(308, path, extra={'Location': 'https://' + hostname + self.path}, head=head)
-            name = 'index.html' if path in ('/', '/index.html') else path.lstrip('/')
+            name = 'index.html' if path in ('/', '/index.html', '/cases') else path.lstrip('/')
             if name not in files or name == '_headers' or path.startswith('//'):
                 return self.respond(404, path, files['404.html'], {'Content-Type': 'text/html; charset=utf-8'}, head)
             body = files[name]
