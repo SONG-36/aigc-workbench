@@ -31,6 +31,9 @@ function publicOnly():Plugin {
         kind:'READ_ONLY_STATIC_SHOWCASE',publicCases:cases.length,externalConnections:'DISABLED_BY_CSP',
         internalApplicationModules:0,modules:[...new Set(modules)].sort(),
       },null,2)})
+      // Explicit allowlist: never copy a public directory or attach server functions.
+      for(const fileName of ['_headers','404.html','robots.txt'])
+        this.emitFile({type:'asset',fileName,source:readFileSync(resolve(frontend,'showcase',fileName),'utf8')})
     },
   }
 }
