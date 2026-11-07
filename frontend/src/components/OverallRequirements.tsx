@@ -17,7 +17,7 @@ export function OverallRequirements({task, write, onSaved, onDirty}: {
     const guard = (event: BeforeUnloadEvent) => {if (dirty) {event.preventDefault();event.returnValue = ''}}
     window.addEventListener('beforeunload', guard); return () => window.removeEventListener('beforeunload', guard)
   }, [dirty])
-  return <section className="slot-shell" aria-label="整体运营要求设置">
+  return <section className="overall-requirements" aria-label="整体运营要求设置">
     <label>整体运营要求<textarea aria-label="整体运营要求" rows={3} maxLength={2000} value={text}
       disabled={write.locked} onChange={e => {edited.current = true;setText(e.target.value);setSaved(false)}} /></label>
     <p className="muted">服务器版本 V{version} · 本任务全部图位。仅约束后续生成和显式修改，与逐图要求共同生效；不自动重做图片或改变已有 Pass。</p>

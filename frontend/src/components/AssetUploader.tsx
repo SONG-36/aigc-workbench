@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { uploadAsset } from '../api/tasks'
 import type { WriteAction } from '../hooks/useWriteAction'
 import type { AssetRole, TaskDraft } from '../types'
+import { FilePicker } from './FilePicker'
 
 export function AssetUploader({ task, role, write, onSaved }: {
   task: TaskDraft; role: AssetRole; write: WriteAction; onSaved: (task: TaskDraft) => void
@@ -28,13 +29,8 @@ export function AssetUploader({ task, role, write, onSaved }: {
       <a href={asset.url} target="_blank" rel="noreferrer"><img src={asset.url} alt={asset.filename} /></a>
       <figcaption>{asset.filename}<br /><span className="muted">服务端已保存 · {asset.width}×{asset.height}</span></figcaption>
     </figure>)}</div>
-    <label className="upload-label">＋ 添加{label}
-      <input type="file" accept="image/png,image/jpeg,image/webp" aria-label={`选择${label}`}
-        disabled={write.locked} onChange={event => {
-          setFile(event.target.files?.[0] || null); setOperationId(newOperationId())
-          event.target.value = ''
-        }} />
-    </label>
+    <FilePicker label={`选择${label}`} action={`添加${label}`} compact={saved.length > 0} disabled={write.locked}
+      onSelect={file=>{setFile(file);setOperationId(newOperationId())}} />
     <p className="muted">JPEG / PNG / WebP，单张最多 10 MiB、2500 万像素；可逐张添加多张素材。原文件不覆盖。</p>
     {file && <div className="pending-asset">
       <p>{file.name} · {write.busy ? '有保存操作进行中；此处尚未确认保存' : '待上传文件，本地预览不是已保存素材'}</p>

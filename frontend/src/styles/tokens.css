@@ -1,0 +1,28 @@
+:root {
+  --color-app-bg: #F6F8FB;
+  --color-surface: #FFFFFF;
+  --color-surface-muted: #F1F5F9;
+  --color-border: #E2E8F0;
+  --color-primary: #3563E9;
+  --color-primary-hover: #284FC9;
+  --color-primary-soft: #EEF3FF;
+  --color-text: #1B2638;
+  --color-text-secondary: #64748B;
+  --color-text-muted: #94A3B8;
+  --color-text-support: #53647B;
+  --color-success: #18704A;
+  --color-success-soft: #EDF8F1;
+  --color-danger: #B33439;
+  --color-danger-soft: #FFF1F2;
+  --color-warning: #865910;
+  --color-warning-soft: #FFFAEB;
+  --color-control-border: #BCC8D9;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --radius-control: 8px; --radius-panel: 12px; --radius-small: 6px;
+  --shadow-panel: 0 2px 6px rgb(27 38 56 / 3%);
+  --shadow-floating: 0 8px 28px rgb(27 38 56 / 8%);
+  --duration: 160ms;
+  --font-body: 14px; --font-small: 12px; --font-title: 30px;
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}

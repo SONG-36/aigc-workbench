@@ -1,5 +1,6 @@
 import { operationId as newOperationId } from '../utils/operationId'
 import { useEffect, useRef, useState } from 'react'
+import {versionName,reviewName} from '../utils/presentation'
 import { ApiError } from '../api/tasks'
 import { quoteRevision, reviewImage, type Candidate, type RevisionQuote, type SlotWorkspace } from '../api/generation'
 
@@ -34,7 +35,7 @@ export function RevisionPanel({ taskId, slotId, candidate, data, draft, setDraft
       setDraft({ ...draft, baseId: candidate.image_version_id }); setError('')
     }}>以当前查看版本为修改基础</button>
     {draft.baseId && <>
-      <p className="muted">修改基础：{draft.baseId}</p>
+      <p className="muted">修改基础：{versionName(data.candidates,draft.baseId)}</p><details className="metadata-details"><summary>基础版本身份</summary><p>{draft.baseId}</p></details>
       {!matches && <p className="notice">正在查看其他版本，原修改草稿仍绑定原基础。
         <button onClick={() => select(draft.baseId)}>查看基础版本并继续</button></p>}
       <label>本轮修改意见<textarea aria-label="本轮修改意见" maxLength={2000} value={text}
@@ -84,7 +85,7 @@ export function ReviewPanel({ taskId, slotId, candidate, data, disabled, refresh
   }
   return <section className="review-panel" aria-label="人工版本审核">
     <h3>人工审核当前查看版本</h3>
-    <p>版本：{candidate.image_version_id} · {candidate.review_status || 'PENDING'}
+    <p>{versionName(data.candidates,candidate.image_version_id)} · {reviewName(candidate.review_status)}
       {candidate.is_current_delivery ? ' · 当前有效交付' : ''}</p>
     <label>操作者标签（未经身份验证）<input aria-label="操作者标签" value={reviewer} maxLength={80} disabled={disabled || !!pending}
       onChange={e => setReviewer(e.target.value)} /></label>
@@ -92,12 +93,12 @@ export function ReviewPanel({ taskId, slotId, candidate, data, disabled, refresh
     <label>审核反馈<textarea aria-label="审核反馈" maxLength={2000} value={feedback} disabled={disabled || !!pending}
       onChange={e => setFeedback(e.target.value)} /></label>
     <div className="review-actions">
-      <button disabled={disabled || !!pending || !reviewer.trim()} onClick={() => setDecision('PASS')}>Pass 此版本</button>
-      <button disabled={disabled || !!pending || !reviewer.trim() || candidate.has_historical_pass}
+      <button className="button-success" disabled={disabled || !!pending || !reviewer.trim()} onClick={() => setDecision('PASS')}>Pass 此版本</button>
+      <button className="button-danger" disabled={disabled || !!pending || !reviewer.trim() || candidate.has_historical_pass}
         onClick={() => setDecision('REJECT')}>Reject 此版本</button>
     </div>
     {decision && <div className="notice">
-      <p>确认 {decision} 版本 {candidate.image_version_id}？{decision === 'PASS'
+      <p>确认 {decision} 版本 {versionName(data.candidates,candidate.image_version_id)}？{decision === 'PASS'
         ? '仅此图位的当前有效交付会更新为该版本，历史审核继续保留。' : '保留图片和历史，当前有效交付保持不变。'}</p>
       <button disabled={disabled || !!pending} onClick={() => void submit()}>确认 {decision}</button>
       <button onClick={() => setDecision(null)}>取消审核</button>
