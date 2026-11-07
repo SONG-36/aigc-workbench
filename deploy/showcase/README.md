@@ -9,6 +9,7 @@
 - 使用目标机已有 `/usr/bin/python3`，无新 Python/Node 依赖。服务器启动时逐文件验 SHA-256、拒绝符号链接，将清单内静态字节载入内存；请求不会按任意路径读取磁盘。
 - 只支持 GET/HEAD。其他方法拒绝，目录、私有文件及未知路由返回 404，不回退到运营应用。当前 Showcase 使用 hash 导航，没有需映射为首页的路径路由。
 - 使用原产物 `_headers` 的 CSP、noindex 和缓存规则；`_headers` 本身不公开。每个响应附带 Origin、Release、Request-ID，可与 Mac mini 的 JSON 访问日志关联验证来源。
+- Origin 额外发送 `Cache-Control: no-transform`，阻止 Cloudflare 自动注入统计脚本及改写 HTML，保持原始字节与严格 CSP。此设置只作用于本站响应，不修改 Zone 的统计或其他站点配置。依据：[Cloudflare Web Analytics](https://developers.cloudflare.com/web-analytics/get-started/)。
 - 独立 Tunnel 仅允许 `studio-demo.enterprise-ai-workspace.com → http://127.0.0.1:8040`，兜底 404。不得包含内部 8030 或国金路由。
 - 国金为现有本地管理单副本 Tunnel；本次独立运行，避免为改 ingress 重启它。使用已有 cloudflared，不安装、卸载或更改原服务。
 - LaunchAgent 运行在目标用户 GUI 登录会话。需要实际验证启动/重启；不能据此宣称退出登录或断电重启后仍全天运行。

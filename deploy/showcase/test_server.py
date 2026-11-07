@@ -57,6 +57,7 @@ class ShowcaseOriginTests(unittest.TestCase):
         self.assertIn("frame-ancestors 'none'", headers['Content-Security-Policy'])
         self.assertIn('noindex', headers['X-Robots-Tag'])
         self.assertEqual(headers['X-Frame-Options'], 'DENY')
+        self.assertIn('no-transform', headers['Cache-Control'])
         self.assertEqual(self.request('/', 'HEAD')[2], b'')
         self.assertEqual(self.request('/', headers={'If-None-Match': headers['ETag']})[0], 304)
         self.assertIn('immutable', self.request('/assets/main.js')[1]['Cache-Control'])

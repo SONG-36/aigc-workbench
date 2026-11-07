@@ -73,6 +73,8 @@ def create_server(root, manifest, release, host='127.0.0.1', port=8040):
                     headers.update(values)
             if status not in (200, 304):
                 headers['Cache-Control'] = 'no-store'
+            # Keep Cloudflare's automatic analytics/HTML rewriting out of this origin.
+            headers['Cache-Control'] = headers.get('Cache-Control', 'public, max-age=0, must-revalidate') + ', no-transform'
             headers.update(extra or {})
             headers.update({'X-Showcase-Origin': 'mac-mini', 'X-Showcase-Release': release,
                             'X-Showcase-Request-ID': request_id, 'Connection': 'close'})
