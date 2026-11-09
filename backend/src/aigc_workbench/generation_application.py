@@ -111,9 +111,11 @@ class GenerationApplication:
         service = self._service()
         snapshot = service.service.evidence.load_snapshot(UUID(rows[0]["id"]))
         _, slot = self._slot(task_id, slot_id)
-        if slot.output_size != snapshot["context"]["slot_state"]["output_size"]:
-            # A changed pixel size needs a new execution snapshot, never a rewrite of the
-            # decision or previous Run. prepare revalidates every non-size source/requirement.
+        refresh_handoff = (snapshot.get('decision_template_version') == 'quick-a-current-slot-decision-v1'
+                           and snapshot['prompt'].get('template_version') is None)
+        if slot.output_size != snapshot["context"]["slot_state"]["output_size"] or refresh_handoff:
+            # A changed size or older brief-only assembly needs a new execution snapshot,
+            # never a rewrite of the decision/Run or another C03-C05 model call.
             # Subsequent reads reuse this snapshot; this is offline preparation, never dispatch.
             snapshot = service.prepare(UUID(snapshot["decision_snapshot_id"]),
                                        Path(snapshot["handoff_directory"]), MODEL)

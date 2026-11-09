@@ -27,6 +27,9 @@ CALCULATOR_SOURCE = "https://developers.openai.com/api/docs/guides/image-generat
 PRICING_CHECKED = "2026-11-05"
 PARAMETERS = {"model": MODEL, "size": "1024x1536", "quality": "high", "complexity": "high",
               "n": 1, "stream": False, "output_format": "png"}
+VISUAL_HANDOFF_VERSION = "quick-a-c06-selected-visual-decisions-v1"
+VISUAL_EXECUTION_FIELDS = ("layout", "product_presentation", "typography", "vehicle_icon_mapping",
+                           "colors_and_background", "reference_elements_to_retain", "differentiation")
 
 
 def image_parameters(plan: dict, model: str = MODEL) -> dict:
@@ -36,9 +39,30 @@ def image_parameters(plan: dict, model: str = MODEL) -> dict:
     return {**PARAMETERS, "size": plan["model_generation_size"]}
 
 
-def generation_prompt(sources: dict, plan: dict) -> str:
-    effective = sources["decision_snapshot"]["context"].get("effective_requirements")
+def generation_prompt(sources: dict, plan: dict, *, handoff_version: str | None = None) -> str:
+    if handoff_version not in {None, VISUAL_HANDOFF_VERSION}:
+        raise C01Error("C06_HANDOFF_VERSION_UNSUPPORTED", "CONTEXT_ASSEMBLY", "不支持的C06交接版本。")
+    context = sources["decision_snapshot"]["context"]
+    effective = context.get("effective_requirements")
     instruction = sources["prompt"]
+    if handoff_version == VISUAL_HANDOFF_VERSION:
+        # Read only executable C05 fields from the verified, same-slot decision. The brief is
+        # another model-generated field, not an authoritative summary of every chosen detail.
+        visual = sources["creation_decision"]["C05_VISUAL_CREATION"]
+        selected = {key: visual[key] for key in VISUAL_EXECUTION_FIELDS if visual.get(key)}
+        instruction = (
+            "制作依据优先级：真实商品外观及既有业务边界保持有效；运营当前有效的整体和逐图要求"
+            "优先于AI制作简写及C05设计选择。AI设计与运营要求冲突的部分不执行，不能用AI建议覆盖运营要求；"
+            "运营要求之间的冲突仍按既有conflict_policy处理，不擅自采用最后输入优先。"
+            "下述C05字段是本图位候选方案的具体制作选择，保留其中正向要求及负向限制；"
+            "原文明确标为可选、建议、备选或有条件的内容保持原有语气及条件，不升级为强制要求或禁止事项。"
+            "这些内容仍是PROPOSED / REVIEW PENDING，不是运营批准，也不构成新的商品事实。\n\n"
+            "C06 CREATION BRIEF:\n" + instruction)
+        if selected:
+            instruction += "\n\nC05 SELECTED VISUAL DECISIONS (same slot; subordinate to effective operator requirements):\n" + canonical(selected)
+        if effective is None and context["slot_state"].get("requirements"):
+            instruction += "\n\nEFFECTIVE OPERATOR SLOT REQUIREMENTS (ONE_SLOT; higher priority than AI design):\n" + canonical({
+                "slot_id": context["slot_state"]["id"], "text": context["slot_state"]["requirements"]})
     if effective is not None:
         instruction += "\n\nEFFECTIVE OPERATOR REQUIREMENTS (versioned business input, not product facts):\n" + canonical(effective)
     if (plan["requested_output_size"] == plan["model_generation_size"]
@@ -166,6 +190,7 @@ class C06Service(C01RealService):
                     'authority': 'AI_DERIVED / TEST_ONLY' if self.test_mode else 'ORIGINAL_MODEL_OUTPUT / PROPOSED'}
                    for name in ('structured-result.json', '05_C06_EXECUTION_HANDOFF.json', '05_C06_EXECUTION_HANDOFF.md')]
         return {'decision_snapshot': snapshot, 'decision_run_id': run['run_id'], 'sources': sources, 'prompt': prompt,
+                'creation_decision': decision,
                 'handoff_directory': str(directory.resolve()), 'slot_state': snapshot['context']['slot_state'],
                 'images': flight['request']['input'][0]['content'][1:]}
 
@@ -237,7 +262,9 @@ class C06Service(C01RealService):
         old = sources["decision_snapshot"]
         identity = str(uuid4())
         plan = output_plan(sources["slot_state"]["output_size"])
-        prompt = generation_prompt(sources, plan)
+        handoff_version = (VISUAL_HANDOFF_VERSION
+                           if old['context']['version'] == 'quick-a-current-slot-decision-v1' else None)
+        prompt = generation_prompt(sources, plan, handoff_version=handoff_version)
         context = {"business_source": old["context"]["business_source"], "slot_state": sources["slot_state"],
                    "image_inputs": old["context"]["image_inputs"],
                    "capability_specific_inputs": old["context"]["capability_specific_inputs"],
@@ -258,6 +285,10 @@ class C06Service(C01RealService):
                                                        "images": planned_images}},
                     "actual_model_input": None, "input_classification": "PLANNED MODEL INPUT",
                     "model_api_call_attempted": False, "parameters": image_parameters(plan, self.image_model), "output_plan": plan}
+        if handoff_version:
+            # Only new execution snapshots use the new assembly. Existing frozen prompts and
+            # archived model briefs remain verifiable byte for byte under their original path.
+            snapshot["prompt"]["template_version"] = handoff_version
         return self.service.evidence.save_snapshot(snapshot, base64.b64decode(sources["images"][0]["image_url"].split(",", 1)[1]))
 
     def preflight(self, snapshot_id: UUID, model: str, max_output_tokens: int = 4096) -> dict:
@@ -268,7 +299,8 @@ class C06Service(C01RealService):
             raise C01Error("C06_SNAPSHOT_INVALID", "MODEL_PREFLIGHT", "C06模型、参数或快照不一致。")
         sources = self._sources(UUID(snapshot["decision_snapshot_id"]), Path(snapshot["handoff_directory"]))
         if (sources["sources"] != snapshot["source_provenance"]
-                or generation_prompt(sources, plan) != snapshot["prompt"]["planned_model_input"]["text"]
+                or generation_prompt(sources, plan, handoff_version=snapshot["prompt"].get("template_version"))
+                != snapshot["prompt"]["planned_model_input"]["text"]
                 or sources["slot_state"] != snapshot["context"]["slot_state"]
                 or plan["requested_output_size"] != sources["slot_state"]["output_size"]
                 or self.service.evidence.read_snapshot_image(snapshot)
