@@ -6,6 +6,7 @@ import {fixedSlot,slotTitle} from '../utils/slotTypes'
 import {ReferenceImage} from './ReferenceImage'
 import {FilePicker} from './FilePicker'
 import {Icon} from './Icon'
+import {ListingMaterialsFields} from './ListingMaterials'
 
 function DraftImage({label,file,saved,expectedName,disabled,onChange}:{label:string;file:File|null;saved?:Asset;expectedName?:string;disabled:boolean;onChange:(file:File)=>void}) {
  const [preview,setPreview]=useState<string|null>(null)
@@ -33,13 +34,18 @@ export function TaskForm({mode='quick_a'}:{mode?:TaskDraft['mode']}){
     disabled={!form.canChoose('product')} onChange={file=>form.choose('product',file)}/></div>
    </div>
   </section>
+  {mode==='listing'&&<section className="form-section" aria-label="Listing 商品资料输入"><h3>商品文字资料</h3>
+   <ListingMaterialsFields listingText={draft.listingText} supplementalText={draft.supplementalText} disabled={busy||draft.started}
+    onChange={(field,value)=>form.edit({[field]:value})}/><p className="muted">商品资料提供营销内容；下方设计参考可选，只提供版式和风格。</p></section>}
   <section id="slot-references" className="form-section"><div className="section-head"><div className="section-title"><span className="section-number">02</span><h3>图位与营销参考</h3></div></div>
-   <p className="muted">在对应图位上传参考，保存时自动绑定。</p>
+   <p className="muted">{mode==='listing'?'设计参考可选；无需参考也可直接制作。默认主图已启用，可按需增加卖点或场景图。':'在对应图位上传参考，保存时自动绑定。'}</p>
    <div className="slot-grid">{draft.slots.map(slot=>{const label=slotTitle(slot.kind,slot.ordinal),file=files.references?.[slot.key]||null
     return <fieldset className="slot-shell" key={slot.key} data-draft-slot-id={slot.key} data-slot-kind={slot.kind}>
      <legend>{label}</legend>
+     {mode==='listing'&&fixedSlot(slot.kind)&&<label className="batch-slot-choice"><input type="checkbox" aria-label={`制作${label}`} checked={slot.active}
+      disabled={busy||draft.started} onChange={event=>form.enableSlot(slot.key,event.target.checked)}/>制作{label}（无需设计参考）</label>}
      {!fixedSlot(slot.kind)&&<button className="button-quiet button-danger" type="button" disabled={busy||draft.started} onClick={()=>form.removeSlot(slot.key)}>删除{label}</button>}
-     {slot.kind==='dimensions'&&<p className="notice">尺寸图使用商品图和本图位营销参考直接生成；保留参考已有的尺寸数值、单位、文字和标注关系，不编造新尺寸。</p>}
+     {slot.kind==='dimensions'&&<p className="notice">{mode==='listing'?'尺寸图需运营确认、已标注真实尺寸的专用白底商品素材；不继承设计参考的尺寸，也不能由像素推断。':'尺寸图使用商品图和本图位营销参考直接生成；保留参考已有的尺寸数值、单位、文字和标注关系，不编造新尺寸。'}</p>}
      <DraftImage label={`${label}参考`} file={file} saved={saved(slot.referenceId)} expectedName={slot.fileInfo?.name}
       disabled={!form.canChoose(slot.key)} onChange={file=>form.choose(slot.key,file)}/>
      {(file||slot.referenceId)&&<button className="button-quiet" type="button" disabled={busy||draft.started} onClick={()=>form.clearReference(slot.key)}>移除{label}参考</button>}

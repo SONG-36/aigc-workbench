@@ -28,7 +28,7 @@ export async function request(path: string, options: RequestInit = {}): Promise<
 function decodeTask(value: unknown): TaskDraft {
   const t = value as Partial<TaskDraft> | null
   if (!t || typeof t.id !== 'string' || typeof t.title !== 'string'
-    || !['quick_a','quick_b'].includes(t.mode || '') || t.status !== 'draft' || t.can_generate !== false
+    || !['quick_a','quick_b','listing'].includes(t.mode || '') || t.status !== 'draft' || t.can_generate !== false
     || typeof t.materials_ready !== 'boolean' || typeof t.readiness_reason !== 'string'
     || typeof t.created_at !== 'string' || !Array.isArray(t.assets) || !Array.isArray(t.slots)
     || (t.can_delete!==undefined&&typeof t.can_delete!=='boolean')
@@ -46,6 +46,11 @@ function decodeTask(value: unknown): TaskDraft {
     throw new ApiError('服务器返回的任务格式不符合当前接口，未应用该状态。', 'unknown')
   }
   const r = t.overall_requirement
+  const m=t.listing_materials
+  if(t.mode==='listing'&&(!m||m.task_id!==t.id||typeof m.id!=='string'||!Number.isInteger(m.version)||m.version<1
+    ||typeof m.listing_text!=='string'||!m.listing_text.trim()||typeof m.supplemental_text!=='string'||typeof m.saved_at!=='string')){
+    throw new ApiError('服务器商品资料格式不正确，请核对保存结果。','unknown')
+  }
   if (r && (r.task_id !== t.id || r.scope !== 'TASK_ALL_SLOTS' || !Number.isInteger(r.version) || r.version < 0
     || typeof r.text !== 'string' || r.text.length > 2000 || typeof r.source !== 'string'
     || (r.version > 0 && (typeof r.id !== 'string' || typeof r.saved_at !== 'string')))) {
@@ -55,13 +60,24 @@ function decodeTask(value: unknown): TaskDraft {
     saved_at: null, source: 'NOT_PROVIDED'}} as TaskDraft
 }
 
-export async function createTaskDraft(title: string, operationId: string, overallRequirements = '', mode:TaskDraft['mode']='quick_a'): Promise<TaskDraft> {
+export async function createTaskDraft(title: string, operationId: string, overallRequirements = '', mode:TaskDraft['mode']='quick_a',
+ listingText='',supplementalText=''): Promise<TaskDraft> {
   const task = decodeTask(await request('/tasks', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, operation_id: operationId, ...(mode==='quick_b'?{mode}:{}), ...(overallRequirements ? {overall_requirements: overallRequirements} : {}) }),
+    body: JSON.stringify({ title, operation_id: operationId, ...(mode!=='quick_a'?{mode}:{}),
+      ...(mode==='listing'?{listing_text:listingText,supplemental_text:supplementalText}:{}), ...(overallRequirements ? {overall_requirements: overallRequirements} : {}) }),
   }))
   if (task.mode!==mode || task.overall_requirement?.text !== overallRequirements) throw new ApiError('服务器未确认本次模式或整体要求已保存，请核对任务；输入仍保留。', 'unknown')
+  if(mode==='listing'&&(task.listing_materials?.listing_text!==listingText||task.listing_materials?.supplemental_text!==supplementalText))throw new ApiError('服务器未确认商品资料已保存。','unknown')
   return task
+}
+
+export async function saveListingMaterials(taskId:string,listingText:string,supplementalText:string,expectedVersion:number,operationId:string){
+ const task=decodeTask(await request(`/tasks/${taskId}/listing-materials`,{method:'PUT',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({listing_text:listingText,supplemental_text:supplementalText,expected_version:expectedVersion,operation_id:operationId})}))
+ if(task.id!==taskId||task.mode!=='listing'||task.listing_materials?.listing_text!==listingText||task.listing_materials?.supplemental_text!==supplementalText)
+  throw new ApiError('服务器未确认本次商品资料保存，请重新读取核对。','unknown')
+ return task
 }
 
 // 保留 Quick-A 现有调用名称及请求内容，任务创建本身仍复用同一个 API。

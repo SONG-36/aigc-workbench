@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { getTask } from '../api/tasks'
+import { ListingMaterialsEditor } from '../components/ListingMaterials'
 import { TaskForm } from '../components/TaskForm'
 import { WorkspaceShell } from '../components/WorkspaceShell'
 import { AssetUploader } from '../components/AssetUploader'
@@ -32,6 +33,7 @@ function SavedWorkspace({ initial }: { initial: TaskDraft }) {
   // Serializes writes within this workspace; late snapshots cannot overwrite newer writes.
   const write = useWriteAction()
   const [overallDirty, setOverallDirty] = useState(false)
+  const [materialsDirty,setMaterialsDirty]=useState(false)
   const [unsavedSlots, setUnsavedSlots] = useState<Set<string>>(new Set())
   const onDirty = useCallback((slotId: string, dirty: boolean) => setUnsavedSlots(previous => {
     if (previous.has(slotId) === dirty) return previous
@@ -42,15 +44,16 @@ function SavedWorkspace({ initial }: { initial: TaskDraft }) {
   return <WorkspaceShell task={task}
     feedback={<WriteFeedback write={write}/>}
     navigation={<StudioSidebar task={task} selectedId={selected?.id} status={slotStatus} onSelect={selectSlot}><SlotTools task={task} write={write} onSaved={setTask} onSelect={selectSlot}/></StudioSidebar>}
-    output={<><BatchGeneration task={task} locked={write.locked||overallDirty||unsavedSlots.size>0} onSelect={selectSlot}
+    output={<><BatchGeneration task={task} locked={write.locked||overallDirty||materialsDirty||unsavedSlots.size>0} onSelect={selectSlot}
       onBusy={setBatchBusy} onSubmitted={onBatchSubmitted}/>
-      <GenerationWorkspace task={task} slot={selected} onStatus={setSlotStatus} locked={write.locked || overallDirty} generationLocked={batchBusy}
+      <GenerationWorkspace task={task} slot={selected} onStatus={setSlotStatus} locked={write.locked || overallDirty || materialsDirty} generationLocked={batchBusy}
        refreshToken={generationRefresh} unsavedSlots={unsavedSlots} /></>}>
     <details id="input-panel" className="studio-settings" open={inputOpen} onToggle={event=>setInputOpen(event.currentTarget.open)}>
       <summary><Icon name="image"/><strong>素材与制作设置</strong><span className="settings-toggle">{inputOpen?'收起':'展开'}</span></summary>
       <div className="input-content">
         <AssetUploader task={task} role="product_image" write={write} onSaved={setTask}/>
         <SlotPanel task={task} selectedId={selected?.id} write={write} onSaved={setTask} onDirty={onDirty}/>
+        {task.mode==='listing'&&<ListingMaterialsEditor task={task} write={write} onSaved={setTask} onDirty={setMaterialsDirty}/>}
         <OverallRequirements task={task} write={write} onSaved={setTask} onDirty={setOverallDirty}/>
         <details className="metadata-details"><summary>任务资料</summary><dl><dt>Task ID</dt><dd data-testid="task-id">{task.id}</dd><dt>创建时间</dt><dd>{new Date(task.created_at).toLocaleString()}</dd></dl>
           <p>{task.materials_ready?'已有图位基础素材齐备；生成条件以当前图位的服务器检查为准。':'尚未提供商品图与营销参考，或图位绑定未齐备；不可生成。'}</p></details>
@@ -62,7 +65,7 @@ function SavedWorkspace({ initial }: { initial: TaskDraft }) {
 export function Workspace() {
   const { taskId } = useParams()
   const [params,setParams]=useSearchParams()
-  const mode=params.get('mode')==='quick_b'?'quick_b':'quick_a'
+  const mode=params.get('mode')==='listing'?'listing':params.get('mode')==='quick_b'?'quick_b':'quick_a'
   const [task, setTask] = useState<TaskDraft | null>(null)
   const [loading, setLoading] = useState(Boolean(taskId))
   const [error, setError] = useState<string | null>(null)

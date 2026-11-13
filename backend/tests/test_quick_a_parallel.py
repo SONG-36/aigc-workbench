@@ -155,7 +155,7 @@ def test_v11_additive_migration_keeps_old_slot_and_requirements(config):
     with database.connection() as db:
         row=tuple(db.execute('SELECT * FROM image_slots WHERE id=?',(slot,)).fetchone())
         assert row[:-1]==before and row[-1]==0
-        assert db.execute('PRAGMA user_version').fetchone()[0]==13
+        assert db.execute('PRAGMA user_version').fetchone()[0]==14
         assert not db.execute('PRAGMA foreign_key_check').fetchall()
 
 

@@ -400,7 +400,7 @@ def test_v8_migration_rolls_back_and_preserves_v7_business_and_evidence(config, 
         assert 'progress_json' not in [r[1] for r in db.execute('PRAGMA table_info(c06_dispatches)')]
     monkeypatch.setattr(persistence, 'V8_TABLES', statements); database.initialize()
     with database.connection() as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0] == 13
+        assert db.execute('PRAGMA user_version').fetchone()[0] == 14
         for name, rows in before.items(): assert [tuple(r) for r in db.execute('SELECT * FROM ' + name)] == rows
 
 

@@ -51,7 +51,7 @@ def create_app(settings: Settings | None = None, *, generation_transport=None, u
         finally:
             app.state.generation_service.dispatcher.close()
 
-    app = FastAPI(title="AIGC Workbench · Quick-A/Quick-B", lifespan=lifespan,
+    app = FastAPI(title="AIGC Workbench · Quick-A/Quick-B/Listing", lifespan=lifespan,
                   docs_url=None if pilot else "/docs", redoc_url=None if pilot else "/redoc",
                   openapi_url=None if pilot else "/openapi.json")
 

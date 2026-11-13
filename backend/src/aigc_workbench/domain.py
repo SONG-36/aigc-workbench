@@ -110,6 +110,30 @@ class OverallRequirement:
 
 
 @dataclass(frozen=True)
+class ListingMaterials:
+    """Task 上版本化的原始商品文字；不是 AI 提炼结果或独立知识库。"""
+    id: UUID
+    task_id: UUID
+    version: int
+    listing_text: str
+    supplemental_text: str
+    saved_at: datetime
+
+    @staticmethod
+    def validate(listing_text: str, supplemental_text: str) -> None:
+        if not isinstance(listing_text, str) or not listing_text.strip() or len(listing_text) > 50000:
+            raise InvalidTask("Listing 商品资料必填，最多 50000 字符。")
+        if not isinstance(supplemental_text, str) or len(supplemental_text) > 20000:
+            raise InvalidTask("补充商品描述与卖点须为文本，最多 20000 字符。")
+
+    def projection(self) -> dict:
+        return {"id": str(self.id), "task_id": str(self.task_id), "version": self.version,
+                "listing_text": self.listing_text, "supplemental_text": self.supplemental_text,
+                "saved_at": self.saved_at.isoformat(), "scope": "TASK_ALL_SLOTS",
+                "source": "OPERATOR_PRODUCT_MATERIALS / NOT_INDEPENDENTLY_VERIFIED"}
+
+
+@dataclass(frozen=True)
 class Task:
     id: UUID
     title: str
@@ -121,11 +145,12 @@ class Task:
     overall_requirement: OverallRequirement | None = None
     deleted_at: datetime | None = None
     has_unresolved_execution: bool = False
+    listing_materials: ListingMaterials | None = None
 
     @classmethod
     def create(cls, title: str, mode: str = "quick_a") -> "Task":
-        if mode not in {"quick_a", "quick_b"}:
-            raise InvalidTask("任务模式须为 Quick-A 或 Quick-B。")
+        if mode not in {"quick_a", "quick_b", "listing"}:
+            raise InvalidTask("任务模式须为 Quick-A、Quick-B 或 Listing。")
         return cls(uuid4(), cls.normalize_title(title), datetime.now(timezone.utc), mode=mode)
 
     @staticmethod
@@ -149,7 +174,11 @@ class Task:
             return '该图位已移除，仅保留历史。'
         if not any(a.role == AssetRole.PRODUCT_IMAGE for a in self.assets):
             return '请先上传并保存商品图。'
+        if self.mode == 'listing' and (self.listing_materials is None or not self.listing_materials.listing_text.strip()):
+            return '请先保存必需的 Listing 商品资料。'
         if slot.reference_asset_id is None:
+            if self.mode == 'listing':
+                return None  # Listing 的设计参考可选；不能借用其他图位来补齐。
             return '请为本图位上传并绑定营销参考图。'
         if not any(a.id == slot.reference_asset_id and a.role == AssetRole.MARKETING_REFERENCE for a in self.assets):
             return '本图位绑定的参考素材不可用，请重新核对。'

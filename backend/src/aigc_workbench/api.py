@@ -21,8 +21,18 @@ class CreateTaskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(strict=True)
     operation_id: UUID
-    mode: Literal["quick_a", "quick_b"] = "quick_a"
+    mode: Literal["quick_a", "quick_b", "listing"] = "quick_a"
     overall_requirements: str = Field(default="", strict=True, max_length=2000)
+    listing_text: str = Field(default="", strict=True, max_length=50000)
+    supplemental_text: str = Field(default="", strict=True, max_length=20000)
+
+
+class SaveListingMaterialsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    listing_text: str = Field(strict=True, max_length=50000)
+    supplemental_text: str = Field(default="", strict=True, max_length=20000)
+    expected_version: int = Field(strict=True, ge=0)
+    operation_id: UUID
 
 
 class SaveOverallRequirementRequest(BaseModel):
@@ -91,13 +101,14 @@ class SlotResponse(BaseModel):
 class TaskResponse(BaseModel):
     id: UUID
     title: str
-    mode: Literal["quick_a", "quick_b"]
+    mode: Literal["quick_a", "quick_b", "listing"]
     status: Literal["draft"]
     can_generate: Literal[False]
     materials_ready: bool
     readiness_reason: str
     created_at: datetime
     overall_requirement: dict
+    listing_materials: dict | None
     assets: list[AssetResponse]
     slots: list[SlotResponse]
     can_delete: bool
@@ -111,6 +122,7 @@ class TaskResponse(BaseModel):
             readiness_reason=task.readiness_reason, created_at=task.created_at,
             can_delete=task.deleted_at is None and not task.has_unresolved_execution,
             delete_blocked_reason=task.delete_blocked_reason,
+            listing_materials=task.listing_materials.projection() if task.listing_materials else None,
             overall_requirement=(task.overall_requirement.projection() if task.overall_requirement else {
                 "id": None, "task_id": str(task.id), "version": 0, "text": "", "scope": "TASK_ALL_SLOTS", "saved_at": None,
                 "source": "NOT_PROVIDED"}),
@@ -226,12 +238,19 @@ def candidate_content(task_id: UUID, slot_id: UUID, version_id: UUID, service: G
 
 @router.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "scope": "Quick-A/Quick-B workspace; controlled C06 generation"}
+    return {"status": "ok", "scope": "Quick-A/Quick-B/Listing workspace; controlled C06 generation"}
 
 
 @router.post("/tasks", response_model=TaskResponse, status_code=201)
 def create_task(body: CreateTaskRequest, service: Service) -> TaskResponse:
-    return TaskResponse.from_task(service.create_draft(body.title, body.operation_id, body.overall_requirements, body.mode))
+    return TaskResponse.from_task(service.create_draft(body.title, body.operation_id, body.overall_requirements, body.mode,
+                                                     body.listing_text, body.supplemental_text))
+
+
+@router.put('/tasks/{task_id}/listing-materials', response_model=TaskResponse)
+def save_listing_materials(task_id: UUID, body: SaveListingMaterialsRequest, service: Service):
+    return TaskResponse.from_task(service.save_listing_materials(task_id, body.listing_text, body.supplemental_text,
+                                                               body.expected_version, body.operation_id))
 
 
 @router.get("/tasks", response_model=list[TaskResponse])

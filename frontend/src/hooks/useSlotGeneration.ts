@@ -39,7 +39,7 @@ export function useSlotGeneration(task: TaskDraft, slot: ImageSlot, refreshToken
     }
     void read()
     return () => { controller.abort(); clearTimeout(timer) }
-  }, [task.id, slot.id, slot.reference_asset_id, slot.output_size, slot.requirements, slot.version, task.assets.length, task.overall_requirement?.version, revision,refreshToken])
+  }, [task.id, slot.id, slot.reference_asset_id, slot.output_size, slot.requirements, slot.version, task.assets.length, task.overall_requirement?.version, task.listing_materials?.version, revision,refreshToken])
 
   async function send(quote?: RevisionQuote) {
     if (locked.current || pendingOperation.current || uncertain || (quote ? !data?.can_request_revision : !data?.readiness.can_generate || !data.readiness.quote_token)) return

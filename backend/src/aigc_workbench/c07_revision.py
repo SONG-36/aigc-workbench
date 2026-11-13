@@ -47,6 +47,14 @@ def compose(context):
     if context['version'] == 'c07-quick-b-selected-base-v1':
         from .quickb import SUBJECT_RULES, MARKETING_RULES
         boundaries += SUBJECT_RULES + MARKETING_RULES
+    if context['version'] == 'c07-listing-selected-base-v1':
+        from .listing import PRODUCT_RULES, REFERENCE_RULES, DIMENSIONS_RULES
+        boundaries = ('Image 1 是明确选定的基础图，Image 2 是其关联实售商品图。'
+                      + ('Image 3 是本图当前设计参考。' if len(context['image_inputs']) == 3 else '本图没有设计参考。')
+                      + PRODUCT_RULES + REFERENCE_RULES
+                      + '只执行本轮修改，尽可能保持基础图未要求改变的有效内容；不重放历史意见，不引入其他图位，新候选不覆盖 Pass。')
+        if context['effective_constraints']['current_slot_kind'] == 'dimensions':
+            boundaries += DIMENSIONS_RULES
     if "output_plan" in context:
         plan = context["output_plan"]
         output = OUTPUT.replace("1024x1536", plan["model_generation_size"])
@@ -70,11 +78,13 @@ class C07Service(C06Service):
             raise C01Error('TEST_REVISION_DISABLED', 'ACCESS', 'TEST_ONLY基础图片不能用于真实运营修改。')
         task = self.service.tasks.get_draft(task_id)
         slot = next((s for s in task.slots if s.id == slot_id), None)
-        if task.mode not in {"quick_a", "quick_b"} or slot is None or slot.output_size not in OUTPUT_SIZES or not slot.reference_asset_id:
+        if (task.mode not in {"quick_a", "quick_b", "listing"} or slot is None or slot.output_size not in OUTPUT_SIZES
+                or (not slot.reference_asset_id and task.mode != 'listing')):
             raise C01Error("REVISION_SLOT_UNSUPPORTED", "SOURCE_SELECTION", "本轮修改需要当前 Quick-A/Quick-B 图位、有效参考及受支持的输出像素尺寸。")
         product, product_bytes = self.service.tasks.read_asset(task_id, UUID(base["product_asset_id"]))
-        reference, reference_bytes = self.service.tasks.read_asset(task_id, slot.reference_asset_id)
-        if product.role != AssetRole.PRODUCT_IMAGE or reference.role != AssetRole.MARKETING_REFERENCE:
+        reference, reference_bytes = (self.service.tasks.read_asset(task_id, slot.reference_asset_id)
+                                      if slot.reference_asset_id else (None, None))
+        if product.role != AssetRole.PRODUCT_IMAGE or (reference is not None and reference.role != AssetRole.MARKETING_REFERENCE):
             raise C01Error("REVISION_SOURCE_ROLE_INVALID", "SOURCE_SELECTION", "实际商品与营销参考角色不正确。")
         parent = self.service.evidence.load_snapshot(UUID(base["snapshot_id"]))
         root_id = parent.get("root_c06_snapshot_id", parent["id"])
@@ -83,9 +93,12 @@ class C07Service(C06Service):
             raise C01Error("REVISION_ROOT_INVALID", "SOURCE_SELECTION", "基础版本缺少对应的原始制作来源。")
         records = root["source_provenance"]
         quick_b = root['context'].get('version') == 'quick-b-direct-v1'
+        listing = root['context'].get('version') == 'listing-direct-v1'
+        if (task.mode == 'listing') != listing:
+            raise C01Error('REVISION_MODE_MISMATCH', 'SOURCE_SELECTION', '基础版本与当前任务模式不一致。')
         if (task.mode == 'quick_b') != quick_b:
             raise C01Error('REVISION_MODE_MISMATCH', 'SOURCE_SELECTION', '基础版本与当前任务模式不一致。')
-        direct = root['context'].get('version') in {'quick-a-direct-v1', 'quick-b-direct-v1'}
+        direct = root['context'].get('version') in {'quick-a-direct-v1', 'quick-b-direct-v1', 'listing-direct-v1'}
         if direct:
             # 直接生成版本以自身 Snapshot/原图来源追溯，不读取不存在的 C03 交接文件。
             if records != [{'kind': 'ASSET', **item} for item in root['context']['image_inputs']]:
@@ -100,10 +113,11 @@ class C07Service(C06Service):
                 raise C01Error("REVISION_CONSTRAINT_SOURCE_CHANGED", "SOURCE_SELECTION", "归档制作约束哈希不一致。")
             original = json.loads(payload)["image_creation_decision"]
         image_inputs = [{"kind": "IMAGE_VERSION", "role": "revision_base", "source_image_version_id": str(base_id), **base["image"]},
-                        {"kind": "ASSET", "role": "product_image", "source_asset_id": str(product.id), **asdict(product.image)},
-                        {"kind": "ASSET", "role": "marketing_reference", "source_asset_id": str(reference.id), **asdict(reference.image)}]
+                        {"kind": "ASSET", "role": "product_image", "source_asset_id": str(product.id), **asdict(product.image)}]
+        if reference is not None:
+            image_inputs.append({"kind": "ASSET", "role": "marketing_reference", "source_asset_id": str(reference.id), **asdict(reference.image)})
         effective = {"current_slot_requirements": slot.requirements,
-                     "current_slot_size": slot.output_size, "current_reference_asset_id": str(slot.reference_asset_id),
+                     "current_slot_size": slot.output_size, "current_reference_asset_id": str(slot.reference_asset_id) if slot.reference_asset_id else None,
                      "marketing_source_status": "QUICK_A_REFERENCE_APPLICABLE / NOT_INDEPENDENTLY_CERTIFIED",
                      "initial_AI_decision_status": "NOT_APPLICABLE_DIRECT_IMAGE" if direct else
                          "PROPOSED / NOT_OPERATOR_APPROVED; current explicit requirements govern presentation"}
@@ -114,6 +128,11 @@ class C07Service(C06Service):
                 initial_AI_content_decisions=original['C04_MARKETING_CONTENT']['claim_decisions'])
         if quick_b:
             effective['marketing_source_status'] = 'QUICK_B_OPERATOR_DEFAULT_APPLICABLE / NOT_INDEPENDENTLY_CERTIFIED'
+        if listing:
+            if task.listing_materials is None or not task.listing_materials.listing_text.strip():
+                raise C01Error('LISTING_MATERIALS_MISSING', 'SOURCE_SELECTION', '请先保存 Listing 商品资料。')
+            effective.update(current_listing_materials=task.listing_materials.projection(), current_slot_version=slot.version, current_slot_kind=slot.kind.value,
+                             marketing_source_status='LISTING_PRODUCT_MATERIALS_PRIMARY / DESIGN_REFERENCE_ONLY')
         from .requirements import effective_requirements
         requirements = effective_requirements(task, slot)
         if requirements is not None:
@@ -128,7 +147,7 @@ class C07Service(C06Service):
         business_docs = [{"file": name, "sha256": sha256((self.service.source_root / name).read_bytes()).hexdigest()}
                          for name in ("docs/business/02_INTENT_AND_CONTEXT_RULES.md", "docs/business/04_IMAGE_CREATION_WORK_METHOD.md")]
         return {"base": base, "root": root, "root_id": root_id, "image_inputs": image_inputs,
-                "bytes": [image, product_bytes, reference_bytes], "effective_constraints": effective,
+                "bytes": [image, product_bytes] + ([reference_bytes] if reference is not None else []), "effective_constraints": effective,
                 "source_provenance": records, "business_documents": business_docs}
 
     def prepare(self, task_id: UUID, slot_id: UUID, base_id: UUID, revision_text: str):
@@ -151,9 +170,12 @@ class C07Service(C06Service):
         if root['context'].get('version') == 'quick-b-direct-v1':
             context['version'] = 'c07-quick-b-selected-base-v1'
             context['business_source']['mode'] = 'quick_b'
+        if root['context'].get('version') == 'listing-direct-v1':
+            context['version'] = 'c07-listing-selected-base-v1'
+            context['business_source']['mode'] = 'listing'
         composition = compose(context)
         snapshot = {"id": str(uuid4()), "created_at": now(), "capability": "C07", "task_id": str(task_id), "slot_id": str(slot_id),
-                    "product_asset_id": base["product_asset_id"], "reference_asset_id": sources["image_inputs"][2]["source_asset_id"],
+                    "product_asset_id": base["product_asset_id"], "reference_asset_id": sources["image_inputs"][2]["source_asset_id"] if len(sources['image_inputs']) > 2 else None,
                     "base_image_version_id": str(base_id), "root_c06_snapshot_id": sources["root_id"],
                     "decision_snapshot_id": root.get("decision_snapshot_id"), "upstream_run_ids": [base["run_id"]],
                     "source_provenance": sources["source_provenance"], "context": context, "context_sha256": fingerprint(context),
@@ -188,7 +210,7 @@ class C07Service(C06Service):
                   for item, data in zip(sources["image_inputs"], sources["bytes"])]
         request = {**image_parameters(plan, self.image_model), "prompt": snapshot["prompt"]["planned_model_input"]["text"], "images": images}
         from .bailian_model import IMAGE_MODEL, image_request, quote, details
-        endpoint, cost = ENDPOINT, estimate_image_cost(request["prompt"], image_count=3, model_size=request["size"])
+        endpoint, cost = ENDPOINT, estimate_image_cost(request["prompt"], image_count=len(images), model_size=request["size"])
         if model == IMAGE_MODEL:
             request = image_request(image_parameters(plan, model), request["prompt"], images)
             endpoint, cost = details(model)["endpoint"], quote(request)

@@ -30,11 +30,12 @@ export function BatchGeneration({task,locked,onSelect,onBusy,onSubmitted}:{task:
  const [readiness,setReadiness]=useState<Record<string,{signature:string;canGenerate:boolean;reason:string}>>({})
  // 未就绪图位也必须可见；素材数量、可生成数量与后台并发数是不同概念。
  const slots=task.slots.filter(s=>!s.archived)
- const signature=slots.map(s=>`${s.id}/${s.version}/${s.reference_asset_id}/${s.requirements}/${s.output_size}`).join('|')+task.assets.length+task.overall_requirement?.version
+ const signature=slots.map(s=>`${s.id}/${s.version}/${s.reference_asset_id}/${s.requirements}/${s.output_size}`).join('|')+task.assets.length+task.overall_requirement?.version+'/'+task.listing_materials?.version
  function blockedReason(slot:ImageSlot){
   if(slot.generation_blocked_reason)return slot.generation_blocked_reason
   if(!task.assets.some(a=>a.role==='product_image'))return '请先上传并保存商品图。'
-  if(!slot.reference_asset_id)return '请为本图位上传并绑定营销参考图。'
+  if(task.mode==='listing'&&!task.listing_materials?.listing_text.trim())return '请先保存 Listing 商品资料。'
+  if(task.mode!=='listing'&&!slot.reference_asset_id)return '请为本图位上传并绑定营销参考图。'
   if(!slot.inputs_ready)return '本图位素材尚未就绪，请核对商品图及参考绑定。'
   const checked=readiness[slot.id]
   return checked?.signature===signature&&!checked.canGenerate?checked.reason:null

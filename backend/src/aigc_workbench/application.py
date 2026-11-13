@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 from uuid import UUID, uuid4
 
-from .domain import OverallRequirement, Asset, AssetRole, Conflict, ImageMetadata, ImageSlot, InvalidTask, SlotKind, Task
+from .domain import ListingMaterials, OverallRequirement, Asset, AssetRole, Conflict, ImageMetadata, ImageSlot, InvalidTask, SlotKind, Task
 
 
 class TaskNotFound(LookupError):
@@ -19,7 +19,10 @@ class StorageUnavailable(OSError):
 class TaskChanges(Protocol):
     def get_task(self, task_id: UUID) -> Task | None: ...
     def task_creation(self, operation_id: UUID) -> Task | None: ...
-    def add_task(self, task: Task, operation_id: UUID, overall_requirement: str = "") -> None: ...
+    def add_task(self, task: Task, operation_id: UUID, overall_requirement: str = "", listing_text: str = "", supplemental_text: str = "") -> None: ...
+    def creation_materials(self, operation_id: UUID) -> tuple[str, str]: ...
+    def listing_material_operation(self, task_id: UUID, operation_id: UUID) -> ListingMaterials | None: ...
+    def add_listing_materials(self, materials: ListingMaterials, operation_id: UUID) -> None: ...
     def creation_requirement(self, operation_id: UUID) -> str: ...
     def creation_title(self, operation_id: UUID) -> str: ...
     def rename_task(self, task_id: UUID, title: str, expected_title: str) -> None: ...
@@ -61,24 +64,54 @@ class TaskService:
     def __init__(self, store: TaskStore, files: ImageFiles):
         self.store, self.files = store, files
 
-    def create_draft(self, title: str, operation_id: UUID, overall_requirement: str = "", mode: str = "quick_a") -> Task:
+    def create_draft(self, title: str, operation_id: UUID, overall_requirement: str = "", mode: str = "quick_a",
+                     listing_text: str = "", supplemental_text: str = "") -> Task:
         title = Task.normalize_title(title)
         OverallRequirement.validate(overall_requirement)
+        if mode == 'listing':
+            ListingMaterials.validate(listing_text, supplemental_text)
+        elif listing_text or supplemental_text:
+            raise InvalidTask('商品文字资料仅用于 Listing 模式。')
         with self.store.write() as changes:
             previous = changes.task_creation(operation_id)
             if previous:
                 if previous.deleted_at is not None:
                     raise Conflict('任务已删除，原创建操作不能重新建立任务。')
                 if (changes.creation_title(operation_id) != title or changes.creation_requirement(operation_id) != overall_requirement
-                        or previous.mode != mode):
+                        or previous.mode != mode or changes.creation_materials(operation_id) != (listing_text, supplemental_text)):
                     raise Conflict("同一创建操作不能用于不同任务内容。")
                 return previous
             task = Task.create(title, mode)
-            changes.add_task(task, operation_id, overall_requirement)
+            if mode == 'listing':
+                changes.add_task(task, operation_id, overall_requirement, listing_text, supplemental_text)
+            else:
+                changes.add_task(task, operation_id, overall_requirement)
+            if mode == 'listing':
+                changes.add_listing_materials(ListingMaterials(uuid4(), task.id, 1, listing_text, supplemental_text,
+                                                              datetime.now(timezone.utc)), operation_id)
             if overall_requirement:
                 changes.add_requirement(OverallRequirement(uuid4(), task.id, 1, overall_requirement, datetime.now(timezone.utc)), operation_id)
             task = changes.get_task(task.id)
         return task
+
+    def save_listing_materials(self, task_id: UUID, listing_text: str, supplemental_text: str,
+                              expected_version: int, operation_id: UUID) -> Task:
+        ListingMaterials.validate(listing_text, supplemental_text)
+        with self.store.write() as changes:
+            task = require_task(changes.get_task(task_id))
+            if task.mode != 'listing':
+                raise InvalidTask('仅 Listing 任务可以保存商品文字资料。')
+            previous = changes.listing_material_operation(task_id, operation_id)
+            if previous:
+                if (previous.version, previous.listing_text, previous.supplemental_text) != (expected_version + 1, listing_text, supplemental_text):
+                    raise Conflict('同一商品资料保存操作不能更换内容或基础版本。')
+                return task
+            version = task.listing_materials.version if task.listing_materials else 0
+            if type(expected_version) is not int or expected_version != version:
+                raise Conflict('商品资料版本已变化，请重新读取并核对；未覆盖服务器资料。')
+            changes.add_listing_materials(ListingMaterials(uuid4(), task_id, version + 1, listing_text, supplemental_text,
+                                                          datetime.now(timezone.utc)), operation_id)
+            return require_task(changes.get_task(task_id))
 
     def save_overall_requirement(self, task_id: UUID, text: str, expected_version: int, operation_id: UUID) -> Task:
         OverallRequirement.validate(text)

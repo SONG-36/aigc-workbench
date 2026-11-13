@@ -335,7 +335,7 @@ def test_v2_to_v3_additive_migration_and_rollback(tmp_path, monkeypatch):
     monkeypatch.setattr(persistence, "V3_TABLES", original)
     SQLiteTaskStore(dbpath).initialize()
     with sqlite3.connect(dbpath) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 14
         assert db.execute("SELECT id,title FROM task_drafts").fetchone() == (identity, "S01 preserved")
 
 

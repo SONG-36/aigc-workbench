@@ -94,10 +94,10 @@ describe('F01 frontend with explicit HTTP mocks (not browser or AI acceptance)',
     expect(await screen.findByText(/尚无任务/)).toBeInTheDocument()
   })
 
-  it('enables Quick-B while keeping Listing unavailable', () => {
+  it('enables Quick-B and Listing creation modes', () => {
     mount('/workspace/new')
     expect(screen.getByRole('option', { name: /Quick-B/ })).not.toBeDisabled()
-    expect(screen.getByRole('option', { name: /Listing/ })).toBeDisabled()
+    expect(screen.getByRole('option', { name: /Listing/ })).not.toBeDisabled()
     expect(screen.getByLabelText('选择商品图片')).toBeInTheDocument()
     expect(screen.getByLabelText('整体运营要求')).not.toBeDisabled()
     expect(screen.getByText(/作用于本任务全部图位的后续生成/)).toBeInTheDocument()

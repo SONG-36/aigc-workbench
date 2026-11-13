@@ -526,6 +526,16 @@ C07 继续使用选定基础版本的商品来源、当前 Slot 参考及有效�
 
 专项离线测试见 `backend/tests/test_quick_b.py` 和 `frontend/src/test/quickB.test.tsx`。Fake/Mock 能验证请求、来源、并发和保存行为，实际主体替换完整性、文字/规格保真与冲突处理质量仍需真实模型和运营验收。
 
+### Listing V1：商品资料制图
+
+首页“新建 Listing”，上传实际商品图，直接粘贴必需的 Listing 原文，并可补充商品描述、卖点和整体要求。文本框默认五行，可滚动、展开和再次编辑；无需 JSON。新建页可勾选固定图位，默认启用主图，卖点和场景图按需增加。每个图位设计参考可选，没有参考也可以生成。
+
+独立业务核心为 `backend/src/aigc_workbench/listing.py`：`read_inputs → build_prompt → prepare → preflight → run`。商品图控制外观，Listing/补充资料控制商品营销内容，设计参考仅辅助布局与风格；每次一次 C06，不执行 C01～C05。版本化原文保存在 Task 关联的 `task_listing_materials`（V14 迁移），按 Task 共享、Slot 隔离；保存携带资料版本和 Operation，旧页面返回 409，重放不重复增加版本。修改资料不改写旧 Snapshot、候选或 Pass。
+
+C07 继承选定基础版本及其商品、当前有效商品资料、本 Slot 可选参考与本轮修改。支持参考的增删，不重放历史意见；批量生成、Worker 上限、错误处理、版本和审核沿用现有实现。开发环境会记录脱敏的 Listing 身份、耗时和结果，详细请求及来源保存在既有私有 Evidence 中。
+
+尺寸图遵循已确认的专用真实标注素材规则，不从设计参考或输出像素推断尺寸。重大商品矛盾、必保留信息缺失和尺寸依据不足的处理要求写入 Prompt；不宣称已实现独立的事实冲突识别器或新审批流程，实际模型遵守情况仍需人工验收。专项 Fake 测试见 `backend/tests/test_listing.py` 与 `frontend/src/test/listing.test.tsx`。
+
 ### C01 本地终端调试：保留的独立/历史步骤
 
 `AIGC_ENV=development AIGC_DEBUG_C01=1` 时，C01 在终端 stderr 打印

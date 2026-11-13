@@ -66,3 +66,6 @@
 .batch-generation li { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .batch-slot-choice { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
 .batch-slot-choice input { width: auto; margin: 0; padding: 0; }
+
+.listing-text-fields textarea { overflow-y: auto; resize: vertical; }
+.listing-materials { margin-top: 24px; }

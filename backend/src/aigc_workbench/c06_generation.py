@@ -293,6 +293,9 @@ class C06Service(C01RealService):
 
     def preflight(self, snapshot_id: UUID, model: str, max_output_tokens: int = 4096) -> dict:
         snapshot = self.service.evidence.load_snapshot(snapshot_id)
+        if snapshot['context'].get('version') == 'listing-direct-v1':
+            from .listing import ListingService
+            return ListingService(self.settings, self.service, test_mode=self.test_mode).preflight(snapshot_id, model)
         if snapshot['context'].get('version') == 'quick-b-direct-v1':
             from .quickb import QuickBService
             return QuickBService(self.settings, self.service, test_mode=self.test_mode).preflight(snapshot_id, model)

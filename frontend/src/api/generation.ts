@@ -3,7 +3,7 @@ import { ApiError, request } from './tasks'
 export type ExecutionState = 'NOT_STARTED' | 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'OUTCOME_UNKNOWN'
 export interface Candidate {
   image_version_id: string; candidate_id: string; task_id: string; slot_id: string; run_id: string
-  created_at: string; product_asset_id: string; reference_asset_id: string
+  created_at: string; product_asset_id: string; reference_asset_id: string|null
   status: 'CANDIDATE_REVIEW_PENDING'; operator_approved: boolean; pass: boolean; url: string
   base_image_version_id?: string | null; revision_text?: string | null
   requested_output_size?: string; model_generation_size?: string; final_output_size?: string

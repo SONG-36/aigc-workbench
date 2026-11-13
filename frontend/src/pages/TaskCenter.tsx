@@ -79,7 +79,8 @@ export function TaskCenter() {
     <div className="heading task-hero"><div><p className="eyebrow">YOUR CREATIVE STUDIO</p>
       <h1>让商品图片，进入下一版。</h1><p className="muted">从真实商品素材到营销视觉，管理每一次创作与修改。</p></div>
       <div className="actions"><Link className="primary button-link" to="/workspace/new">＋ 新建 Quick-A<Icon name="arrow" /></Link>
-      <Link className="secondary button-link" to="/workspace/new?mode=quick_b">＋ 新建 Quick-B<Icon name="arrow" /></Link></div></div>
+      <Link className="secondary button-link" to="/workspace/new?mode=quick_b">＋ 新建 Quick-B<Icon name="arrow" /></Link>
+      <Link className="secondary button-link" to="/workspace/new?mode=listing">＋ 新建 Listing<Icon name="arrow" /></Link></div></div>
     <section className="task-list-section" aria-labelledby="task-list-title"><div className="section-head task-list-heading">
       <div><h2 id="task-list-title">制作任务</h2><p className="muted">打开任务，继续素材准备、制作与审核。</p></div>
       <button type="button" onClick={() => setReload(value => value + 1)} disabled={loading||!!busyTask}><Icon name="refresh" className={loading ? 'is-spinning' : ''} />刷新列表</button>
@@ -87,12 +88,12 @@ export function TaskCenter() {
       {loading && <p role="status" className="loading-line"><Icon name="refresh" className="is-spinning" />正在读取任务…</p>}
       {error && <p role="alert" className="error">{error}</p>}
       {!loading && !error && <div className="task-list">
-        {tasks.length === 0 && <div className="empty"><Icon name="image" /><h3>尚无任务，开始你的第一张商品图。</h3><p>新建 Quick-A 或 Quick-B，上传商品与图位参考，所有资料都保存在对应任务中。</p></div>}
+        {tasks.length === 0 && <div className="empty"><Icon name="image" /><h3>尚无任务，开始你的第一张商品图。</h3><p>新建 Quick-A、Quick-B 或 Listing，上传商品与图位参考，所有资料都保存在对应任务中。</p></div>}
         {tasks.map(task => <article className="task-row" key={task.id}>
           <div className="task-thumbnail">{task.assets.find(a => a.role === 'product_image')
             ? <img src={task.assets.find(a => a.role === 'product_image')!.url} alt="" /> : <Icon name="image" />}</div>
           <div className="task-info"><div className="task-title-line"><h3><Link to={`/workspace/${task.id}`}>{task.title}</Link></h3><span className="pill pill--neutral">{task.status === 'draft' ? '任务草稿' : task.status}</span></div>
-            <p className="task-meta">{task.mode==='quick_b'?'Quick-B':'Quick-A'} · <time dateTime={task.created_at}>{new Date(task.created_at).toLocaleString()}</time></p>
+            <p className="task-meta">{task.mode==='listing'?'Listing':task.mode==='quick_b'?'Quick-B':'Quick-A'} · <time dateTime={task.created_at}>{new Date(task.created_at).toLocaleString()}</time></p>
             <p className="muted">{task.assets.length} 张已保存素材 · {task.slots.filter(s=>!s.archived).length} 个图位</p></div>
           <Link className="secondary button-link" to={`/workspace/${task.id}`}><span>打开 / 继续任务</span><Icon name="arrow" /></Link>
           <TaskActions task={task} locked={!!busyTask} onBusy={setBusyTask}

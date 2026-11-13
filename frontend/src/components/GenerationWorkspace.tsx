@@ -60,7 +60,7 @@ function SlotOutput({task,slot,locked,draft,setDraft,onStatus,refreshToken,gener
    <details className="candidate-sources" aria-label="商品与参考来源"><summary>{candidate?'本候选来源对照':'当前商品与参考'}</summary>
     {ready?.product_selection&&<p className="muted">本次生成使用最新上传的商品图片：{task.assets.find(a=>a.id===ready.product_asset_id)?.filename}。历史候选的来源单独保留。</p>}
     <div className="source-grid">{sources.map((asset,index)=><figure key={index}><figcaption>{index===0?'实际商品原图':'绑定的营销参考'}</figcaption>
-     {asset?<><button aria-label={`放大${index===0?'商品原图':'营销参考'}`} onClick={()=>setViewer({url:asset.url,title:index===0?'实际商品原图':'营销参考原图'})}><img src={asset.url} alt={index===0?'实售商品来源':'营销参考来源'}/></button><p className="muted">{asset.filename}</p></>:<p className="muted">来源尚未具备</p>}</figure>)}</div>
+     {asset?<><button aria-label={`放大${index===0?'商品原图':'营销参考'}`} onClick={()=>setViewer({url:asset.url,title:index===0?'实际商品原图':'营销参考原图'})}><img src={asset.url} alt={index===0?'实售商品来源':'营销参考来源'}/></button><p className="muted">{asset.filename}</p></>:<p className="muted">{task.mode==='listing'&&index===1?'未提供设计参考（可选）':'来源尚未具备'}</p>}</figure>)}</div>
    </details>
    <ExecutionDetails executions={data.executions}/>
   </>}

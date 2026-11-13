@@ -30,8 +30,8 @@ function SlotEditor({task,slot,label,write,onSaved,onDirty,hidden}:{hidden?:bool
   {confirmRemoval&&<div className="notice"><p>移除{label}？原素材、历史图片和审核仍保留，其他图位不受影响。</p><div className="actions"><button className="button-danger" type="button" disabled={write.locked} onClick={()=>void write.run(()=>removeSlot(task.id,slot.id,removeOperation),onSaved)}>确认删除{label}</button><button type="button" onClick={()=>setConfirmRemoval(false)}>保留图位</button></div></div>}
   <p className="muted">{dirty?'有未保存配置':'图位配置已保存'} · {slot.reference_asset_id?'参考已保存并绑定到当前图位':'尚未上传本图位参考'}</p>
   {(conflict||reference.conflict)&&<div role="alert" className="notice"><p>图位数据已变化，本页修改未覆盖服务器。请重新读取并核对。</p><button type="button" disabled={write.busy} onClick={()=>void write.run(()=>getTask(task.id),next=>{reference.abandon();setConflict(false);onSaved(next)})}>重新读取服务器配置（放弃本页未保存修改）</button></div>}
-  {slot.kind==='dimensions'&&<p className="notice">尺寸图使用商品图和本图位营销参考直接生成；保留参考已有的尺寸数值、单位、文字和标注关系，不编造新尺寸。</p>}
-  {selected?<ReferenceImage url={selected.url} label={label}/>:<div className="reference-empty">直接在本图位上传参考，无需到其他区域绑定</div>}
+  {slot.kind==='dimensions'&&<p className="notice">{task.mode==='listing'?'尺寸图需运营确认、已标注真实尺寸的专用白底商品素材；不继承设计参考的尺寸，也不能由像素推断。':'尺寸图使用商品图和本图位营销参考直接生成；保留参考已有的尺寸数值、单位、文字和标注关系，不编造新尺寸。'}</p>}
+  {selected?<ReferenceImage url={selected.url} label={label}/>:<div className="reference-empty">{task.mode==='listing'?'设计参考可选；未提供时按商品资料直接设计。':'直接在本图位上传参考，无需到其他区域绑定'}</div>}
   <FilePicker label={`${label}参考图片`} action={selected?'替换参考图':'上传本图位参考'} compact={!!selected} disabled={write.locked||!!reference.pending} onSelect={file=>reference.choose(file,size,requirements)}/>
   {reference.message&&<p role="status">{reference.message}</p>}
   {reference.pending&&<div className="pending-asset"><p>{reference.pending.assetId?'图片已上传，但尚未确认绑定成功。':'本地图像待确认；当前绑定仍以服务器为准。'}</p>

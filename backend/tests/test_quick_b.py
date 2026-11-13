@@ -280,7 +280,7 @@ def test_v12_migration_preserves_all_quick_a_history_and_rolls_back(config,monke
         assert all(sorted(db.execute('SELECT * FROM '+t).fetchall(),key=str)==rows for t,rows in before.items())
     monkeypatch.setattr(SQLiteTaskStore,'_upgrade_v13',original);SQLiteTaskStore(config.database_path).initialize()
     with sqlite3.connect(config.database_path) as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0]==13 and not db.execute('PRAGMA foreign_key_check').fetchall()
+        assert db.execute('PRAGMA user_version').fetchone()[0]==14 and not db.execute('PRAGMA foreign_key_check').fetchall()
         assert all(sorted(db.execute('SELECT * FROM '+t).fetchall(),key=str)==rows for t,rows in before.items())
     with TestClient(create_app(config,generation_transport=images),base_url='http://localhost') as client:
         state=client.get(path+'/workspace').json();assert state['delivery']==delivery and state['candidates'][0]['image_version_id']==version['image_version_id']

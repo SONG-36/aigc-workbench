@@ -51,9 +51,19 @@ class CandidateStore:
             assets = db.execute("SELECT id,role FROM assets WHERE task_id=? AND id IN (?,?)",
                                 (str(task_id), body["product_asset_id"], body["reference_asset_id"])).fetchall()
         run = C01ModelStore(self.database).inspect(UUID(body["run_id"]))
+        expected_assets = {body['product_asset_id']: 'product_image'}
+        if body['reference_asset_id'] is not None:
+            expected_assets[body['reference_asset_id']] = 'marketing_reference'
+        else:
+            from .c01_persistence import C01EvidenceStore
+            snapshot = C01EvidenceStore(self.database, self.directory.parent).load_snapshot(UUID(body['snapshot_id']))
+            with self.database.connection() as db:
+                task = db.execute('SELECT mode FROM task_drafts WHERE id=?', (str(task_id),)).fetchone()
+            if (task is None or task['mode'] != 'listing' or snapshot['reference_asset_id'] is not None
+                    or snapshot['context'].get('version') not in {'listing-direct-v1', 'c07-listing-selected-base-v1'}):
+                raise C01Error('CANDIDATE_ASSOCIATION_INVALID', 'CANDIDATE_QUERY', '仅 Listing 可保存无参考的候选来源。')
         if (slot is None or slot["task_id"] != str(task_id)
-                or {r["id"]: r["role"] for r in assets} != {
-                    body["product_asset_id"]: "product_image", body["reference_asset_id"]: "marketing_reference"}
+                or {r["id"]: r["role"] for r in assets} != expected_assets
                 or run.get("capability") not in {"C06", "C07"} or run["status"] != "SUCCEEDED"
                 or run.get("task_id") != str(task_id) or run.get("slot_id") != str(slot_id)
                 or run.get("product_asset_id") != body["product_asset_id"]

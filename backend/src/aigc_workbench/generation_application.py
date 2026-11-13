@@ -18,6 +18,7 @@ from .quick_a_sources import current_sources, prepare_creation
 from .quick_a_creation import QuickACreation
 from .quick_a_direct import QuickADirectService, VERSION as DIRECT_VERSION, PROMPT_VERSION as DIRECT_PROMPT_VERSION, read_inputs, build_prompt
 from .quickb import QuickBService, VERSION as QUICK_B_VERSION, read_inputs as read_quick_b, build_prompt as quick_b_prompt
+from .listing import ListingService, VERSION as LISTING_VERSION, read_inputs as read_listing, build_prompt as listing_prompt
 from .config import CredentialConfigError, load_openai_credentials
 from .domain import Conflict
 from .c07_revision import C07Service
@@ -67,6 +68,7 @@ class GenerationApplication:
             return QuickACreation(self.settings, self.tasks, self.database, self.dispatcher,
                 responses_transport=self.responses_transport, image_transport=self.transport).execute(snapshot_id, operation_id, budget)
         service = (self._revision_service() if snapshot["capability"] == "C07" else
+                   self._listing_service() if snapshot['context'].get('version') == LISTING_VERSION else
                    self._quick_b_service() if snapshot['context'].get('version') == QUICK_B_VERSION else
                    self._direct_service() if snapshot['context'].get('version') == DIRECT_VERSION else self._service())
         self.dispatcher.progress(operation_id, snapshot['capability'], [])
@@ -84,6 +86,10 @@ class GenerationApplication:
         return QuickBService(self.settings, C01Service(self.settings, self.tasks,
             C01EvidenceStore(self.database, self.settings.data_dir)), test_mode=self.test_mode)
 
+    def _listing_service(self):
+        return ListingService(self.settings, C01Service(self.settings, self.tasks,
+            C01EvidenceStore(self.database, self.settings.data_dir)), test_mode=self.test_mode)
+
     def _slot(self, task_id, slot_id):
         task = self.tasks.get_draft(task_id)
         slot = next((slot for slot in task.slots if slot.id == slot_id), None)
@@ -93,6 +99,15 @@ class GenerationApplication:
 
     def _select(self, task_id, slot_id):
         task, _ = self._slot(task_id, slot_id)
+        if task.mode == 'listing':
+            state, images = read_listing(self._listing_service().service, task_id, slot_id)
+            from .c06_generation import estimate_image_cost
+            return {'kind': 'LISTING_DIRECT', 'state': state, 'images': images,
+                    'cost': estimate_image_cost(listing_prompt({'source_state': state,
+                        'effective_requirements': state['effective_requirements']}), image_count=len(images),
+                        model_size=state['output_plan']['model_generation_size']),
+                    'request_sha256': fingerprint({'sources': state, 'template': LISTING_VERSION,
+                        'parameters': image_parameters(state['output_plan'])})}
         if task.mode == 'quick_b':
             state, images = read_quick_b(self._quick_b_service().service, task_id, slot_id)
             from .c06_generation import estimate_image_cost
@@ -162,7 +177,7 @@ class GenerationApplication:
         return "UNRESTRICTED_PILOT" if self.settings.environment == "pilot" else "UNRESTRICTED_WORKSPACE"
 
     def _quote(self, preflight):
-        if preflight.get('kind') in {'QUICK_A_CREATION', 'QUICK_A_DIRECT', 'QUICK_B_DIRECT'}:
+        if preflight.get('kind') in {'QUICK_A_CREATION', 'QUICK_A_DIRECT', 'QUICK_B_DIRECT', 'LISTING_DIRECT'}:
             return fingerprint({'business_input': preflight['request_sha256'], 'model': MODEL,
                                 'execution_policy': self.budget_policy})
         return fingerprint({"snapshot_id": preflight["snapshot"]["id"],
@@ -263,9 +278,10 @@ class GenerationApplication:
         if self.enabled and self.dispatcher.pool and not self.access_error and not input_blocked_reason:
             try:
                 preflight = self._select(task_id, slot_id)
-                if preflight.get('kind') in {'QUICK_A_CREATION', 'QUICK_A_DIRECT', 'QUICK_B_DIRECT'}:
+                if preflight.get('kind') in {'QUICK_A_CREATION', 'QUICK_A_DIRECT', 'QUICK_B_DIRECT', 'LISTING_DIRECT'}:
                     state = preflight['state']
-                    readiness.update(can_generate=True, reason=('将以实售商品完整替换参考主体，直接生成一张待审候选。'
+                    readiness.update(can_generate=True, reason=('将按当前商品图、商品资料及有效要求直接生成，设计参考可选。'
+                        if preflight['kind'] == 'LISTING_DIRECT' else '将以实售商品完整替换参考主体，直接生成一张待审候选。'
                         if preflight['kind'] == 'QUICK_B_DIRECT' else '将按当前商品、图位参考及有效要求直接生成一张待审候选。'
                         if preflight['kind'] == 'QUICK_A_DIRECT' else '将按需理解当前商品与参考、形成制作决定并生成一张待审候选。'),
                         quote_token=self._quote(preflight), parameters=image_parameters(state['output_plan']),
@@ -324,7 +340,11 @@ class GenerationApplication:
         preflight = self._select(task_id, slot_id)
         if quote_token != self._quote(preflight):
             raise Conflict("制作依据已变化，请刷新并重新核对；未执行。")
-        if preflight.get('kind') == 'QUICK_B_DIRECT':
+        if preflight.get('kind') == 'LISTING_DIRECT':
+            snapshot = self._listing_service().prepare(task_id, slot_id, operation_id)
+            if snapshot['context']['source_state'] != preflight['state']:
+                raise Conflict('冻结前商品资料或制作来源已变化，请刷新后重新核对；未调用模型。')
+        elif preflight.get('kind') == 'QUICK_B_DIRECT':
             snapshot = self._quick_b_service().prepare(task_id, slot_id, operation_id)
             if snapshot['context']['source_state'] != preflight['state']:
                 raise Conflict('冻结前制作来源已变化，请刷新后重新核对；未调用模型。')

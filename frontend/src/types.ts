@@ -37,11 +37,16 @@ export interface OverallRequirement {
   scope: 'TASK_ALL_SLOTS'; saved_at: string | null; source: string
 }
 
+export interface ListingMaterials {
+  id:string;task_id:string;version:number;listing_text:string;supplemental_text:string;saved_at:string;scope:'TASK_ALL_SLOTS';source:string
+}
+
 export interface TaskDraft {
   id: string
   title: string
   overall_requirement?: OverallRequirement
-  mode: 'quick_a' | 'quick_b'
+  mode: 'quick_a' | 'quick_b' | 'listing'
+  listing_materials?:ListingMaterials|null
   status: 'draft'
   can_generate: false
   materials_ready: boolean

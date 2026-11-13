@@ -6,7 +6,7 @@ from pathlib import Path
 import sqlite3
 from uuid import UUID
 
-from .domain import OverallRequirement, Asset, AssetRole, ImageMetadata, ImageSlot, SlotKind, Task
+from .domain import ListingMaterials, OverallRequirement, Asset, AssetRole, ImageMetadata, ImageSlot, SlotKind, Task
 
 
 V1_TASKS = """CREATE TABLE task_drafts (
@@ -221,11 +221,18 @@ def load_task(connection: sqlite3.Connection, task_id: UUID) -> Task | None:
                                (str(task_id),)).fetchall()
     requirement = connection.execute("SELECT * FROM task_requirements WHERE task_id=? ORDER BY version DESC LIMIT 1",
                                      (str(task_id),)).fetchone()
+    materials = (connection.execute('SELECT * FROM task_listing_materials WHERE task_id=? ORDER BY version DESC LIMIT 1',
+                                    (str(task_id),)).fetchone() if row['mode'] == 'listing' else None)
     return Task(UUID(row["id"]), row["title"], datetime.fromisoformat(row["created_at"]),
                 row["mode"], row["status"], tuple(map(asset_from_row, assets)),
                 tuple(map(slot_from_row, slots)), requirement_from_row(requirement) if requirement else None,
                 datetime.fromisoformat(row['deleted_at']) if row['deleted_at'] else None,
-                task_has_unresolved_execution(connection, task_id))
+                task_has_unresolved_execution(connection, task_id), listing_materials_from_row(materials) if materials else None)
+
+
+def listing_materials_from_row(row):
+    return ListingMaterials(UUID(row['id']), UUID(row['task_id']), row['version'], row['listing_text'],
+                            row['supplemental_text'], datetime.fromisoformat(row['saved_at']))
 
 
 class SQLiteTaskStore:
@@ -241,7 +248,7 @@ class SQLiteTaskStore:
             connection.execute("PRAGMA foreign_keys = OFF")
             connection.execute("BEGIN IMMEDIATE")
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}:
+            if version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}:
                 raise RuntimeError(f"Unsupported database schema version: {version}")
             if version == 0:
                 connection.execute(V1_TASKS)
@@ -306,8 +313,33 @@ class SQLiteTaskStore:
             if version == 12:
                 self._upgrade_v13(connection)
                 connection.execute('PRAGMA user_version = 13')
+                version = 13
+            if version == 13:
+                self._upgrade_v14(connection)
+                connection.execute('PRAGMA user_version = 14')
             if connection.execute("PRAGMA foreign_key_check").fetchone():
                 raise RuntimeError("Database foreign-key validation failed")
+
+    def _upgrade_v14(self, connection: sqlite3.Connection) -> None:
+        # 仅扩展 Task.mode 和版本化商品文字；旧素材、Run、版本与审核表保持原样。
+        definition = V1_TASKS.replace('CREATE TABLE task_drafts (', 'CREATE TABLE task_drafts_next (')
+        definition = definition.replace("mode = 'quick_a'", "mode IN ('quick_a','quick_b','listing')")
+        definition = definition.replace('created_at TEXT NOT NULL', 'created_at TEXT NOT NULL, deleted_at TEXT')
+        connection.execute(definition)
+        fields = 'id,title,mode,status,created_at,deleted_at'
+        connection.execute(f'INSERT INTO task_drafts_next ({fields}) SELECT {fields} FROM task_drafts')
+        connection.execute('DROP TABLE task_drafts')
+        connection.execute('ALTER TABLE task_drafts_next RENAME TO task_drafts')
+        for column in ('initial_listing_text', 'initial_supplemental_text'):
+            if column not in {r[1] for r in connection.execute('PRAGMA table_info(task_creations)')}:
+                connection.execute(f"ALTER TABLE task_creations ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
+        connection.execute('''CREATE TABLE IF NOT EXISTS task_listing_materials (
+            id TEXT PRIMARY KEY NOT NULL, task_id TEXT NOT NULL REFERENCES task_drafts(id),
+            version INTEGER NOT NULL CHECK(version > 0), listing_text TEXT NOT NULL CHECK(length(trim(listing_text)) BETWEEN 1 AND 50000),
+            supplemental_text TEXT NOT NULL CHECK(length(supplemental_text) <= 20000), saved_at TEXT NOT NULL,
+            operation_id TEXT NOT NULL, UNIQUE(task_id,version), UNIQUE(task_id,operation_id))''')
+        for action in ('UPDATE','DELETE'):
+            connection.execute(f"CREATE TRIGGER IF NOT EXISTS task_listing_materials_immutable_{action.lower()} BEFORE {action} ON task_listing_materials BEGIN SELECT RAISE(ABORT,'immutable Listing materials'); END")
 
     def _upgrade_v13(self, connection: sqlite3.Connection) -> None:
         # 仅扩展现有 Task.mode 的 CHECK。保留 UUID、软删除及全部子表关系，失败整笔回滚。
@@ -398,12 +430,25 @@ class SQLiteChanges:
                                       (str(operation_id),)).fetchone()
         return self.get_task(UUID(row[0])) if row else None
 
-    def add_task(self, task: Task, operation_id: UUID, overall_requirement: str = "") -> None:
+    def add_task(self, task: Task, operation_id: UUID, overall_requirement: str = "", listing_text: str = "", supplemental_text: str = "") -> None:
         self.connection.execute(
             "INSERT INTO task_drafts (id,title,mode,status,created_at) VALUES (?,?,?,?,?)",
             (str(task.id), task.title, task.mode, task.status, task.created_at.isoformat()))
-        self.connection.execute("INSERT INTO task_creations (operation_id,task_id,initial_overall_requirement,initial_title) VALUES (?,?,?,?)",
-                                (str(operation_id), str(task.id), overall_requirement, task.title))
+        self.connection.execute("INSERT INTO task_creations (operation_id,task_id,initial_overall_requirement,initial_title,initial_listing_text,initial_supplemental_text) VALUES (?,?,?,?,?,?)",
+                                (str(operation_id), str(task.id), overall_requirement, task.title, listing_text, supplemental_text))
+
+    def creation_materials(self, operation_id: UUID) -> tuple[str, str]:
+        row = self.connection.execute('SELECT initial_listing_text,initial_supplemental_text FROM task_creations WHERE operation_id=?', (str(operation_id),)).fetchone()
+        return tuple(row)
+
+    def listing_material_operation(self, task_id: UUID, operation_id: UUID):
+        row = self.connection.execute('SELECT * FROM task_listing_materials WHERE task_id=? AND operation_id=?', (str(task_id),str(operation_id))).fetchone()
+        return listing_materials_from_row(row) if row else None
+
+    def add_listing_materials(self, materials: ListingMaterials, operation_id: UUID) -> None:
+        self.connection.execute('INSERT INTO task_listing_materials VALUES (?,?,?,?,?,?,?)',
+            (str(materials.id), str(materials.task_id), materials.version, materials.listing_text, materials.supplemental_text,
+             materials.saved_at.isoformat(), str(operation_id)))
 
     def creation_title(self, operation_id: UUID) -> str:
         return self.connection.execute('SELECT initial_title FROM task_creations WHERE operation_id=?', (str(operation_id),)).fetchone()[0]
