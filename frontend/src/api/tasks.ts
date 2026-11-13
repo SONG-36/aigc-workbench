@@ -6,10 +6,11 @@ export class ApiError extends Error {
 }
 
 export async function request(path: string, options: RequestInit = {}): Promise<unknown> {
-  const write = options.method === 'POST' || options.method === 'PUT'
+  const write = ['POST','PUT','PATCH','DELETE'].includes(options.method || '')
   let response: Response
   try { response = await fetch(`/api${path}`, options) }
   catch { throw new ApiError(write ? '连接中断，保存结果未知。' : '无法连接服务器。', 'unknown') }
+  if (response.ok && response.status === 204) return null
   let body: unknown
   try { body = await response.json() }
   catch {
@@ -30,6 +31,8 @@ function decodeTask(value: unknown): TaskDraft {
     || t.mode !== 'quick_a' || t.status !== 'draft' || t.can_generate !== false
     || typeof t.materials_ready !== 'boolean' || typeof t.readiness_reason !== 'string'
     || typeof t.created_at !== 'string' || !Array.isArray(t.assets) || !Array.isArray(t.slots)
+    || (t.can_delete!==undefined&&typeof t.can_delete!=='boolean')
+    || (t.delete_blocked_reason!=null&&typeof t.delete_blocked_reason!=='string')
     || !t.assets.every(a => a.task_id === t.id && typeof a.id === 'string'
       && ['product_image', 'marketing_reference'].includes(a.role)
       && a.url === `/api/tasks/${t.id}/assets/${a.id}/content`
@@ -37,7 +40,9 @@ function decodeTask(value: unknown): TaskDraft {
     || !t.slots.every(s => s.task_id === t.id && typeof s.id === 'string'
       && ['main', 'dimensions', 'comparison', 'selling_point', 'scene'].includes(s.kind)
       && OUTPUT_SIZES.includes(s.output_size)
-      && typeof s.inputs_ready === 'boolean' && (s.archived===undefined||typeof s.archived==='boolean'))) {
+      && typeof s.inputs_ready === 'boolean' && (s.archived===undefined||typeof s.archived==='boolean')
+      && (s.generation_blocked_reason==null||typeof s.generation_blocked_reason==='string')
+      && (s.version===undefined||(typeof s.version==='number'&&Number.isInteger(s.version)&&s.version>=0)))) {
     throw new ApiError('服务器返回的任务格式不符合当前接口，未应用该状态。', 'unknown')
   }
   const r = t.overall_requirement
@@ -69,6 +74,19 @@ export async function listTasks(signal?: AbortSignal): Promise<TaskDraft[]> {
   return body.map(decodeTask)
 }
 
+export async function renameTask(task:TaskDraft,title:string):Promise<TaskDraft> {
+  title=title.trim()
+  const saved=decodeTask(await request(`/tasks/${task.id}`,{
+    method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,expected_title:task.title}),
+  }))
+  if(saved.id!==task.id||saved.title!==title)throw new ApiError('服务器未确认本次任务命名，请刷新列表核对。','unknown')
+  return saved
+}
+
+export async function deleteTask(taskId:string):Promise<void> {
+  await request(`/tasks/${taskId}`,{method:'DELETE'})
+}
+
 export async function uploadAsset(taskId: string, role: AssetRole, file: File, operationId: string) {
   const query = new URLSearchParams({ role, operation_id: operationId, filename: file.name })
   const raw = await request(`/tasks/${taskId}/assets?${query}`, {
@@ -86,9 +104,10 @@ export async function createSlot(taskId: string, kind: SlotKind, operationId: st
 }
 
 export async function configureSlot(taskId: string, slot: ImageSlot,
-  values: Pick<ImageSlot, 'reference_asset_id' | 'output_size' | 'requirements'>) {
+  values: Pick<ImageSlot, 'reference_asset_id' | 'output_size' | 'requirements'>, expectedVersion = slot.version ?? 0) {
   return decodeTask(await request(`/tasks/${taskId}/slots/${slot.id}`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values),
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({...values, expected_version: expectedVersion}),
   }))
 }
 

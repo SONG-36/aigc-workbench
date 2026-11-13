@@ -3,7 +3,7 @@
 .task-hero h1 { font-size: clamp(28px,3vw,36px); }
 .task-hero .muted { font-size: 14px; max-width: 540px; }
 .task-hero .primary { padding: 12px 18px; }
-.task-list-section { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-panel); overflow: hidden; box-shadow: var(--shadow-panel); }
+.task-list-section { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-panel); overflow: visible; box-shadow: var(--shadow-panel); }
 .task-list-heading { padding: 22px 24px; border-bottom: 1px solid var(--color-border); }
 .task-list-heading p { margin: 4px 0 0; }
 .task-list-heading h2 { font-size: 17px; }
@@ -26,3 +26,8 @@
 .task-list .empty { border: 0; border-radius: 0; padding: 64px 24px; }
 .task-list .empty p { max-width: 400px; margin: 8px auto 0; }
 @media (max-width:800px) { .task-hero { padding: 16px 0 24px; } .task-row { padding: 18px; gap: 14px; } .task-thumbnail { width: 80px; height: 80px; } .task-row > .button-link { font-size: 12px; padding: 8px; } }
+.task-actions { position: relative; flex: 0 0 auto; }
+.task-actions > [role='menu'], .task-actions > form, .task-actions > [role='dialog'] { position: absolute; z-index: 5; right: 0; top: 100%; width: min(340px,80vw); padding: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); box-shadow: var(--shadow-panel); }
+.task-actions [role='menu'] { display: grid; gap: 8px; }
+.task-actions .error { max-width: 240px; }
+.task-actions .actions { flex-wrap: wrap; margin-top: 12px; }

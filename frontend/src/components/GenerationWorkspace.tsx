@@ -7,8 +7,8 @@ import {ExecutionDetails} from './ExecutionDetails'
 import {Icon} from './Icon'
 import {executionPresentation,reviewName,versionName,type SlotPresentation} from '../utils/presentation'
 
-function SlotOutput({task,slot,locked,draft,setDraft,onStatus}:{task:TaskDraft;slot:ImageSlot;locked:boolean;draft:RevisionDrafts;setDraft:(d:RevisionDrafts)=>void;onStatus?:(s:SlotPresentation)=>void}) {
- const generation=useSlotGeneration(task,slot)
+function SlotOutput({task,slot,locked,draft,setDraft,onStatus,refreshToken,generationLocked}:{task:TaskDraft;slot:ImageSlot;locked:boolean;draft:RevisionDrafts;setDraft:(d:RevisionDrafts)=>void;onStatus?:(s:SlotPresentation)=>void;refreshToken?:number;generationLocked?:boolean}) {
+ const generation=useSlotGeneration(task,slot,refreshToken)
  const [selected,setSelected]=useState(''),[viewer,setViewer]=useState<{url:string;title:string;versionId?:string}|null>(null)
  const {data,error,submitting,uncertain}=generation
  const candidate=data?.candidates.find(c=>c.image_version_id===selected)||data?.candidates[0]
@@ -18,7 +18,7 @@ function SlotOutput({task,slot,locked,draft,setDraft,onStatus}:{task:TaskDraft;s
  const sourceIds=candidate?[candidate.product_asset_id,candidate.reference_asset_id]:[ready?.product_asset_id,ready?.reference_asset_id||slot.reference_asset_id]
  const sources=sourceIds.map(id=>task.assets.find(a=>a.id===id))
  if(!sources[0])sources[0]=task.assets.find(a=>a.role==='product_image')
- const canGenerate=!!ready?.can_generate&&!locked&&!submitting&&!uncertain&&!error
+ const canGenerate=!!ready?.can_generate&&!locked&&!generationLocked&&!submitting&&!uncertain&&!error
  return <div className="slot-output">
   <div className="section-head output-heading"><h2>逐图制作与审核</h2><span className="muted">人工审核后交付</span></div>
   <div className="output-controls"><div><span role="status" aria-live="polite" className={`pill pill--${status.tone}`}>
@@ -79,9 +79,9 @@ function SlotOutput({task,slot,locked,draft,setDraft,onStatus}:{task:TaskDraft;s
  </div>
 }
 
-export function GenerationWorkspace({task,slot,locked,unsavedSlots,onStatus}:{task:TaskDraft;slot?:ImageSlot;locked:boolean;unsavedSlots:Set<string>;onStatus?:(s:SlotPresentation)=>void}) {
+export function GenerationWorkspace({task,slot,locked,unsavedSlots,onStatus,refreshToken,generationLocked}:{task:TaskDraft;slot?:ImageSlot;locked:boolean;unsavedSlots:Set<string>;onStatus?:(s:SlotPresentation)=>void;refreshToken?:number;generationLocked?:boolean}) {
  const [drafts,setDrafts]=useState<Record<string,RevisionDrafts>>({})
  if(!slot)return <><button disabled>生成一张候选</button><div className="empty output-empty"><Icon name="image"/><h3>还没有制作图位</h3><p>请先添加图位并保存参考。</p></div></>
- return <SlotOutput key={slot.id} task={task} slot={slot} onStatus={onStatus} locked={locked||unsavedSlots.has(slot.id)} draft={drafts[`${task.id}/${slot.id}`]||{baseId:'',texts:{}}}
+ return <SlotOutput key={slot.id} task={task} slot={slot} onStatus={onStatus} refreshToken={refreshToken} generationLocked={generationLocked} locked={locked||unsavedSlots.has(slot.id)} draft={drafts[`${task.id}/${slot.id}`]||{baseId:'',texts:{}}}
   setDraft={value=>setDrafts(previous=>({...previous,[`${task.id}/${slot.id}`]:value}))}/>
 }

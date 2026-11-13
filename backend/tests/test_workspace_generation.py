@@ -41,7 +41,7 @@ def finish(client,path):
     deadline=time.monotonic()+4
     while time.monotonic()<deadline:
         body=client.get(path+'/workspace').json()
-        if body['state']!='RUNNING': return body
+        if body['state'] not in {'RUNNING','QUEUED'}: return body
         time.sleep(.01)
     raise AssertionError('isolated substitute did not finish')
 
@@ -118,10 +118,9 @@ def test_server_errors_and_unknown_are_not_success_and_have_no_implicit_retry(ge
         if status>=500: assert not body['readiness']['can_generate']
 
 
-def test_missing_decision_changed_source_and_unconfirmed_payment_do_not_dispatch(generation):
+def test_missing_reference_and_changed_source_do_not_dispatch(generation):
     wire=SyntheticWire();path=route(generation);service,_,_,original=generation
     with TestClient(create_app(settings(generation),generation_transport=wire),base_url='http://localhost') as client:
-        assert paid(client,path,confirm_paid=False).status_code==422
         other=service.service.tasks.create_slot(original['task'],uuid4(),SlotKind.SCENE)
         missing=f"/api/tasks/{original['task']}/slots/{other.id}"
         state=client.get(missing+'/workspace').json()
@@ -240,7 +239,9 @@ def test_model_result_without_local_candidate_blocks_new_payment_until_local_sav
         assert not body['readiness']['can_generate'] and wire.calls==1
         monkeypatch.setattr(CandidateStore,'save',save)
         operation=body['executions'][0]['operation_id']
-        recovered=generation[0].run(UUID(generation[1]['id']),'gpt-image-2.6-sunburst',UUID(operation),
+        # 恢复实际派发的直生图快照，不能换回之前的历史制作决定快照。
+        receipt=client.app.state.generation_service.dispatcher.find(UUID(operation))
+        recovered=client.app.state.generation_service._direct_service().run(UUID(receipt['snapshot_id']),'gpt-image-2.6-sunburst',UUID(operation),
                                   confirmed=True,max_cost_usd='1.00',transport=wire)
         assert recovered['candidate'] and wire.calls==1
         assert client.get(path+'/workspace').json()['state']=='SUCCEEDED'

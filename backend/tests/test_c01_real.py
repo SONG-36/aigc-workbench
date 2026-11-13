@@ -259,11 +259,12 @@ def test_real_service_missing_credentials_stops_before_migration(experiment, mon
     assert exc.value.code == "MODEL_CREDENTIAL_MISSING" and adapter.calls == 0
 
 
-def test_stale_pricing_denies_paid_execution(experiment, monkeypatch):
+def test_stale_pricing_does_not_block_explicit_execution(experiment, monkeypatch):
     real, snap, _ = experiment
     monkeypatch.setattr("aigc_workbench.c01_model.PRICING_CHECKED", "2000-01-01")
-    with pytest.raises(C01Error) as exc: run(real, snap)
-    assert exc.value.code == "PRICING_RECHECK_REQUIRED"
+    adapter = OfflineTransport()
+    assert run(real, snap, adapter)['status'] == 'SUCCEEDED'
+    assert adapter.calls == 1
 
 
 def test_usage_estimate_is_distinct_from_invoice_and_unknown_model_is_not_priced():

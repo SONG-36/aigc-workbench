@@ -45,6 +45,7 @@ def test_api_size_persists_across_restart_without_rewriting_history(revision, si
         slot = next(s for s in task['slots'] if s['id'] == v1['slot_id'])
         payload = {k: slot[k] for k in ('reference_asset_id', 'output_size', 'requirements')}
         payload['output_size'] = size
+        payload['expected_version'] = slot['version']
         response = client.put(path, json=payload)
         assert response.status_code == 200
         assert next(s for s in response.json()['slots'] if s['id'] == slot['id'])['output_size'] == size

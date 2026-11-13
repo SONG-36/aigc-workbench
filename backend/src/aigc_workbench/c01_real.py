@@ -3,6 +3,9 @@
 from copy import deepcopy
 from hashlib import sha256
 import json
+import os
+import re
+import sys
 import time
 from uuid import UUID
 
@@ -22,6 +25,65 @@ class C01RealService:
     def __init__(self, settings, service: C01Service):
         self.settings, self.service = settings, service
         self.store = C01ModelStore(service.evidence.database)
+        self.debug_slot_id = None  # Caller context for terminal logs only; never persisted.
+
+    def _debug_c01(self, label, snapshot, record, value):
+        """Opt-in local C01 prints; logging must never change execution or stored Evidence."""
+        if (self.settings.environment != "development" or os.environ.get("AIGC_DEBUG_C01") != "1"
+                or snapshot.get("capability") != "C01"):
+            return
+        try:
+            if label in {"INPUT", "PROMPT"}:
+                messages = value.get("input", value.get("messages", []))
+                prompt = "\n\n".join(part["text"] for message in messages for part in message["content"]
+                                     if part.get("type") in {"input_text", "text"})
+                if label == "PROMPT":
+                    value = prompt  # Exact rendered request text, not a freshly rendered template.
+                else:
+                    value = {"text": prompt, "context": snapshot["context"],
+                             "effective_state": snapshot["effective_state"],
+                             "images": snapshot["prompt"]["planned_model_input"]["images"],
+                             "asset_path": str(self.settings.data_dir / "assets" / UUID(snapshot["product_asset_id"]).hex),
+                             "frozen_image_path": str(self.service.evidence.images / UUID(snapshot["id"]).hex),
+                             "message_roles": [m["role"] for m in messages],
+                             "parameters": {k: v for k, v in value.items() if k not in {"input", "messages"}}}
+            text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2,
+                default=lambda item: "[BINARY OMITTED]" if isinstance(item, (bytes, bytearray, memoryview)) else str(item))
+            text = re.sub(r"data:[^\s;,]+;base64,(?:[A-Za-z0-9+/=\r\n]|\\[rn])+", "[IMAGE DATA OMITTED]", text)
+            text = re.sub(r'(?i)("(?:b64_json|base64|authorization|proxy-authorization|api[_-]?key|openai_api_key|dashscope_api_key|access_token|refresh_token|token|password|secret)"\s*:\s*)"(?:\\.|[^"\\])*"',
+                          r'\1"[REDACTED]"', text)
+            text = re.sub(r"(?i)\bBearer\s+[^\s\"'<>]+", "Bearer [REDACTED]", text)
+            for name in ("OPENAI_API_KEY", "DASHSCOPE_API_KEY"):
+                secret = os.environ.get(name, "").strip()
+                if secret:
+                    for representation in {secret, json.dumps(secret)[1:-1]}:
+                        text = text.replace(representation, "[REDACTED]")
+            print(f"\n[QUICK_A_C01_DEBUG] Task={snapshot['task_id']} ImageSlot={self.debug_slot_id or '-'} "
+                  f"Step=C01 Run={record['run_id']} Attempt={record['attempt_id']} "
+                  f"Transport={record['transport_label']} {label}\n{text}", file=sys.stderr, flush=True)
+        except Exception:
+            pass  # A closed terminal or malformed debug value cannot fail a business operation.
+
+    def _debug_c01_return(self, snapshot, record, *, reused=False):
+        if (self.settings.environment != "development" or os.environ.get("AIGC_DEBUG_C01") != "1"
+                or snapshot.get("capability") != "C01"):
+            return
+        try:
+            self._debug_c01("DECISION", snapshot, record, {
+                "action": "REUSE_SAVED_RUN_NO_MODEL_CALL" if reused else
+                    "RETURN_VALIDATED_AI_OBSERVATION" if record["status"] == "SUCCEEDED" else "STOP_FAILED_OR_UNKNOWN_C01",
+                "status": record["status"], "new_model_call": not reused and record["model_api_call_attempted"],
+                "http_status": record["response_http_status"], "parsed_contract_accepted": record["structured_output"] is not None,
+                "error": record.get("error"), "business_state_changed": record["business_state_changed"],
+                "automatic_retries": record["automatic_retries"], "operator_pass": False})
+            self._debug_c01("NEXT STEP INPUT", snapshot, record, {
+                "returned_to_caller": {k: record[k] for k in ("run_id", "attempt_id", "snapshot_id", "status", "structured_output")},
+                "continuation_allowed": record["status"] == "SUCCEEDED",
+                "later_consumer_argument": {"c01_run_id": record["run_id"]},
+                "consumer_in_existing_chain": "C03_C04_C05 reads C01_RESULT via c01_run_id; C02 does not consume C01 output.",
+                "note": "This is the C01 return boundary, not evidence that a later stage has executed."})
+        except Exception:
+            pass
 
     def preflight(self, snapshot_id: UUID, model: str, max_output_tokens: int = 4096) -> dict:
         snapshot = self.service.inspect_snapshot(snapshot_id)
@@ -72,6 +134,7 @@ class C01RealService:
         record, created = self.store.start(preflight["snapshot"], operation_id, preflight["request"],
                                           preflight["cost"], max_cost_usd, transport.label, execution_metadata=metadata)
         if not created:
+            self._debug_c01_return(preflight["snapshot"], record, reused=True)
             return record  # Including OUTCOME_UNKNOWN/RUNNING: never replay the paid request.
         # Persist exact request bytes + dispatch intent BEFORE any network operation.
         # A crash here cannot prove whether the provider received it; never claim it did.
@@ -91,11 +154,14 @@ class C01RealService:
                 record['actual_test_adapter_input'] = {'label': 'ACTUAL TEST ADAPTER INPUT / TEST_ONLY',
                                                        'request': deepcopy(preflight['request'])}
             record["dispatch_state"] = "CLIENT_TRANSPORT_INVOKED"
+            self._debug_c01("INPUT", preflight["snapshot"], record, preflight["request"])
+            self._debug_c01("PROMPT", preflight["snapshot"], record, preflight["request"])
             response = transport.send(payload)  # Exactly one invocation; no loop/retry/fallback.
             record["response_http_status"], record["request_id"] = response.status, response.request_id
             record["provider_receipt"] = ("HTTP_RESPONSE_RECEIVED" if record["model_api_call_attempted"]
                                           else "OFFLINE_TEST_ONLY")
             record["raw_response_text"] = response.body.decode("utf-8", errors="replace")
+            self._debug_c01("RESPONSE", preflight["snapshot"], record, record["raw_response_text"])
             try:
                 raw = json.loads(record["raw_response_text"])
             except ValueError as exc:
@@ -124,14 +190,22 @@ class C01RealService:
                 "stage": "MODEL_TRANSPORT" if response is None else "OUTPUT_PARSE",
                 "message": "未取得可靠响应；不能确认远程执行或费用，不自动重试。" if response is None else "响应处理失败，保留原始证据。",
                 "cause_type": type(exc).__name__})
+            if response is None:
+                self._debug_c01("RESPONSE", preflight["snapshot"], record,
+                                {"response_received": False, "error": record["error"]})
+        self._debug_c01("PARSED RESULT", preflight["snapshot"], record, record["structured_output"])
         record["duration_ms"] = round((time.monotonic() - started) * 1000, 3)
         record["attempt_status"], record["finished_at"] = record["status"], now()
         try:
             self.store.save(record)
         except Exception as exc:
+            self._debug_c01("DECISION", preflight["snapshot"], record,
+                            {"action": "STOP_EVIDENCE_SAVE_NOT_CONFIRMED", "continuation_allowed": False})
             raise C01Error("MODEL_EVIDENCE_OUTCOME_UNKNOWN", "EVIDENCE_SAVE",
                            f"Run {record['run_id']} 完成证据未确认；查询保留的派发意图，禁止重新付费。") from exc
-        return self.store.inspect(UUID(record["run_id"]))
+        saved = self.store.inspect(UUID(record["run_id"]))
+        self._debug_c01_return(preflight["snapshot"], saved)
+        return saved
 
 
 def preflight_report(preflight: dict) -> dict:

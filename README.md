@@ -503,6 +503,74 @@ C06/C07 继续使用 `gpt-image-2.6-sunburst` 与原 Images Edits 接口。开�
 - 1536×1536 沿用 1024×1024 原生方图 + Pillow LANCZOS 等比例放大，原生和最终 PNG、尺寸及处理方式分别留证，候选关联最终文件。C07 保留选定基础版本及目标像素尺寸，不重放历史修改意见。
 - 正常启动仍默认关闭模型执行。已有服务器私有 Key、代理及 Workspace/C01/C06/C07 开关继续使用；本轮没有付费调用、没有部署。工程测试通过不等于真实 AI 质量或运营接受。
 
+### Quick-A V1：当前工作台执行方式
+
+- 默认首次生图为：当前 Task 最新商品图 + 当前 Slot 绑定参考图 + 当前有效整体/单图要求 → 冻结独立 Context、Prompt 和 Snapshot → 一次 C06 图片调用 → 保存待审候选。核心顺序见 `backend/src/aigc_workbench/quick_a_direct.py`；不经过 C01～C05，也不拼接其他图位或聊天历史。
+- 尺寸图与其他图位使用相同入口，不要求额外白底图或尺寸核对流程。Prompt 要求保留参考已有的尺寸数值、单位、文字和标注关系，不编造新尺寸；真实成图仍需运营人工审核。
+- 工作台可一键生成全部有效图位，或勾选多个图位生成。数量 N 来自当前任务；`AIGC_GENERATION_MAX_WORKERS=3` 控制后台同时执行数 M（支持 1～16），其余排队，N 不受 M 限制。当前 Dispatcher 是单进程服务，不要为同一数据目录启动多个 Uvicorn worker。
+- 每个 Slot 独立保存 Operation、Snapshot、Run、Attempt 与候选版本；单图失败不撤回其他结果。重复 Operation 保持幂等，结果未知时不自动重试。图片模型等待期间不持有 SQLite 写事务。
+- Slot 保存携带读取时的 `expected_version`，后端原子更新，过期页面返回 HTTP 409；整体要求与 Slot 要求更新仅影响后续执行，不改写旧 Snapshot 或已有 Pass。
+- C07 使用运营选定的基础版本、其关联商品、当前 Slot 参考及当前有效要求，不重放历史修改文字。新候选需要人工 Pass，不覆盖已有有效交付。C01～C05 和旧版本读取保留兼容。
+- 首页任务菜单支持持久重命名和二次确认逻辑删除；排队、执行中或结果未知的任务不能删除。逻辑删除保留素材、版本和执行证据。
+- 已启用模型的工作台中，主动提交即生成操作，不再增加费用确认、价格过期复核或人工预算上限；保留实际 Usage、耗时、错误与认证/限流约束。开发者独立 CLI 的显式授权规则另见下文。
+- 本地终端逐步日志使用 `AIGC_ENV=development AIGC_DEBUG_QUICK_A=1`；只输出脱敏的八步执行信息，不打印图片 Base64 或凭证。模型执行开关默认仍为关闭，详见现有启动说明。
+- 必要离线回归：`backend/.venv/bin/python -m pytest backend/tests -rxX`、`npm --prefix frontend test`、`npm --prefix frontend run build`。测试全部使用 Fake/Mock；既有 XFAIL 表示 `TaskService.get_draft` 仍加载兄弟 Slot 元数据，未实现严格不读取，但实际模型输入隔离由专项断言验证。离线通过不代表真实成图质量验收。
+
+### C01 本地终端调试：保留的独立/历史步骤
+
+`AIGC_ENV=development AIGC_DEBUG_C01=1` 时，C01 在终端 stderr 打印
+`INPUT / PROMPT / RESPONSE / PARSED RESULT / DECISION / NEXT STEP INPUT`，每条带 Task、Image Slot（调用方可提供时）、Step、Run、Attempt 和 Transport。
+Prompt 来自实际请求中的文字；图片只显示 Asset、哈希、角色和本地路径，图片编码及凭证被隐藏。
+没有显式开启、非 development 环境及其他能力均不输出这些详细日志。不会改写原始请求、响应或已保存 Evidence。
+
+Quick-A 默认“生成一张候选”已使用上述直生图入口；`AIGC_DEBUG_C01` 只控制保留的独立 C01 或旧多阶段链路日志，不会改变或暂停模型执行。
+若本轮只手动观察 C01，先在原工作台保存商品、参考及图位，取得 Task UUID 和该任务 `slots[].id`，再在仓库根目录手动运行下列命令。
+该命令使用 Workspace 同一个 `ProductUnderstandingService`，只发起一次 C01；不会调用 C02、制作决定或生图。
+真实调用使用已有后端私有凭证配置及预算门禁；命令重新运行是新的操作，可能产生新费用。
+
+```bash
+cd /path/to/aigc-workbench
+AIGC_ENV=development AIGC_DEBUG_C01=1 \
+AIGC_ENABLE_C01_TESTING=1 AIGC_ENABLE_C01_REAL=1 \
+DEBUG_TASK_ID='替换为 Task UUID' DEBUG_SLOT_ID='替换为 Image Slot UUID' \
+DEBUG_C01_MAX_COST_USD='1.00' backend/.venv/bin/python -B - <<'PY'
+import os
+from uuid import UUID, uuid4
+from aigc_workbench.application import TaskService
+from aigc_workbench.c01_execution import C01Service
+from aigc_workbench.c01_model import DEFAULT_UNDERSTANDING_MODEL, VISION_OUTPUT_TOKENS
+from aigc_workbench.c01_persistence import C01EvidenceStore
+from aigc_workbench.config import Settings, load_openai_credentials
+from aigc_workbench.file_storage import LocalImageFiles
+from aigc_workbench.persistence import SQLiteTaskStore
+from aigc_workbench.quick_a_sources import ProductUnderstandingService, current_sources
+
+task_id, slot_id = UUID(os.environ['DEBUG_TASK_ID']), UUID(os.environ['DEBUG_SLOT_ID'])
+settings = Settings.from_environment()
+if not settings.database_path.is_file():
+    raise SystemExit('需要已有本地业务数据库；未创建任务或调用模型。')
+if load_openai_credentials() != 'KEY_CONFIGURED':
+    raise SystemExit('后端私有凭证未配置；未调用模型。')
+database = SQLiteTaskStore(settings.database_path)
+tasks = TaskService(database, LocalImageFiles(settings.data_dir))
+base = C01Service(settings, tasks, C01EvidenceStore(database, settings.data_dir))
+state, _ = current_sources(base, task_id, slot_id)
+snapshot = base.prepare(task_id, UUID(state['product_asset_id']))
+c01 = ProductUnderstandingService(settings, base)
+c01.debug_slot_id = slot_id
+result = c01.run(UUID(snapshot['id']), DEFAULT_UNDERSTANDING_MODEL, uuid4(),
+    confirmed=True, max_cost_usd=os.environ['DEBUG_C01_MAX_COST_USD'],
+    max_output_tokens=VISION_OUTPUT_TOKENS)
+print('C01 finished:', result['status'], 'Run:', result['run_id'], '; no later stages invoked.')
+raise SystemExit(0 if result['status'] == 'SUCCEEDED' else 1)
+PY
+```
+
+`NEXT STEP INPUT` 是 C01 返回调用方的 Run 身份和已解析结果。原链路的 C02 只理解参考，不消费 C01 结果；后面的合并 C03/C04/C05 才通过 `c01_run_id` 读取它。
+缓存复用仅打印 `REUSE_SAVED_RUN_NO_MODEL_CALL` 和返回边界，不把旧响应冒充新调用。
+如需仅准备资料，可用原启动方式保持 Workspace 生成关闭：
+`AIGC_ENV=development AIGC_ENABLE_WORKSPACE_GENERATION=0 backend/.venv/bin/python -m uvicorn aigc_workbench.app:create_app --factory --host 127.0.0.1 --port 8022`，前端仍为 `npm --prefix frontend run dev`。
+
 隔离浏览器测试（仅开发机、已有依赖；全程 TEST_ONLY）：
 
 ```bash

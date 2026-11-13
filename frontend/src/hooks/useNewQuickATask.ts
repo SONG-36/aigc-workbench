@@ -8,7 +8,7 @@ import {fixedSlot,slotTitle} from '../utils/slotTypes'
 const key='aigc.pending-task-creation'
 type Info=Pick<File,'name'|'size'|'type'|'lastModified'>
 export type DraftSlot={key:string;kind:SlotKind;ordinal:number;active:boolean;size:OutputSize;requirements:string;
- uploadOp:string;slotOp:string;slotId:string|null;referenceId:string|null;fileInfo:Info|null}
+ uploadOp:string;slotOp:string;slotId:string|null;referenceId:string|null;fileInfo:Info|null;configVersion?:number}
 type Draft={title:string;overallRequirements:string;operationId:string;productOp:string;started:boolean;
  taskId:string|null;productId:string|null;productInfo:Info|null;slots:DraftSlot[]}
 const info=(f:File|null):Info|null=>f&&({name:f.name,size:f.size,type:f.type,lastModified:f.lastModified})
@@ -100,7 +100,7 @@ export function useNewQuickATask(){
     progress(`${label}：创建图位`)
     if(!slot.slotId){const created=await createSlot(saved.id,slot.kind,slot.slotOp);saved=created
      if(!created.created_slot_id||!saved.slots.some(s=>s.id===created.created_slot_id&&s.kind===slot.kind))throw new ApiError('服务器未明确返回本次图位身份。','unknown')
-     changeSlot(slot.key,{slotId:created.created_slot_id});publish(saved);slot=current.current.slots.find(s=>s.key===slot.key)!}
+     changeSlot(slot.key,{slotId:created.created_slot_id,configVersion:created.slots.find(s=>s.id===created.created_slot_id)?.version??0});publish(saved);slot=current.current.slots.find(s=>s.key===slot.key)!}
     if(!active.current)return
     const file=selected.current.references?.[slot.key]
     if(!slot.referenceId&&file){progress(`${label}：保存参考图片`);const uploaded=await uploadAsset(saved.id,'marketing_reference',file,slot.uploadOp);saved=uploaded
@@ -109,7 +109,8 @@ export function useNewQuickATask(){
     if(!active.current)return
     progress(`${label}：自动绑定与保存配置`);const persisted=saved.slots.find(s=>s.id===slot.slotId)
     if(!persisted||slot.referenceId&&!saved.assets.some(a=>a.id===slot.referenceId&&a.role==='marketing_reference'))throw new ApiError('已保存图位或参考身份不一致。','unknown')
-    saved=await configureSlot(saved.id,persisted,{reference_asset_id:slot.referenceId,output_size:slot.size,requirements:slot.requirements})
+    if(persisted.reference_asset_id!==slot.referenceId||persisted.output_size!==slot.size||persisted.requirements!==slot.requirements)
+     saved=await configureSlot(saved.id,persisted,{reference_asset_id:slot.referenceId,output_size:slot.size,requirements:slot.requirements},slot.configVersion??0)
     const bound=saved.slots.find(s=>s.id===slot.slotId)
     if(!bound||bound.reference_asset_id!==slot.referenceId||bound.output_size!==slot.size||bound.requirements!==slot.requirements)throw new ApiError('服务器尚未确认本图位绑定及配置。','unknown')
     publish(saved);if(!active.current)return

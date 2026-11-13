@@ -21,6 +21,9 @@ class TaskChanges(Protocol):
     def task_creation(self, operation_id: UUID) -> Task | None: ...
     def add_task(self, task: Task, operation_id: UUID, overall_requirement: str = "") -> None: ...
     def creation_requirement(self, operation_id: UUID) -> str: ...
+    def creation_title(self, operation_id: UUID) -> str: ...
+    def rename_task(self, task_id: UUID, title: str, expected_title: str) -> None: ...
+    def soft_delete_task(self, task_id: UUID, deleted_at: str) -> None: ...
     def requirement_operation(self, task_id: UUID, operation_id: UUID) -> OverallRequirement | None: ...
     def add_requirement(self, requirement: OverallRequirement, operation_id: UUID) -> None: ...
     def asset_upload(self, task_id: UUID, operation_id: UUID) -> Asset | None: ...
@@ -49,7 +52,7 @@ class ImageFiles(Protocol):
 
 
 def require_task(task: Task | None) -> Task:
-    if task is None:
+    if task is None or task.deleted_at is not None:
         raise TaskNotFound("任务不存在。")
     return task
 
@@ -64,7 +67,9 @@ class TaskService:
         with self.store.write() as changes:
             previous = changes.task_creation(operation_id)
             if previous:
-                if previous.title != title or changes.creation_requirement(operation_id) != overall_requirement:
+                if previous.deleted_at is not None:
+                    raise Conflict('任务已删除，原创建操作不能重新建立任务。')
+                if changes.creation_title(operation_id) != title or changes.creation_requirement(operation_id) != overall_requirement:
                     raise Conflict("同一创建操作不能用于不同任务内容。")
                 return previous
             task = Task.create(title)
@@ -96,6 +101,27 @@ class TaskService:
     def list_drafts(self) -> list[Task]:
         return self.store.list()
 
+    def rename_draft(self, task_id: UUID, title: str, expected_title: str) -> Task:
+        title, expected_title = Task.normalize_title(title), Task.normalize_title(expected_title)
+        with self.store.write() as changes:
+            task = require_task(changes.get_task(task_id))
+            if task.title == title:
+                return task  # 重放相同命名不再写库。
+            changes.rename_task(task_id, title, expected_title)
+            return require_task(changes.get_task(task_id))
+
+    def delete_draft(self, task_id: UUID) -> None:
+        # 与派发端共用 BEGIN IMMEDIATE：删除和新的执行回执只能有一方先成功。
+        with self.store.write() as changes:
+            task = changes.get_task(task_id)
+            if task is None:
+                raise TaskNotFound('任务不存在。')
+            if task.deleted_at is not None:
+                return
+            if task.delete_blocked_reason:
+                raise Conflict(task.delete_blocked_reason)
+            changes.soft_delete_task(task_id, datetime.now(timezone.utc).isoformat())
+
     def upload_asset(self, task_id: UUID, operation_id: UUID, role: AssetRole,
                      filename: str, content: bytes, media_type: str) -> Asset:
         self.get_draft(task_id)
@@ -123,7 +149,10 @@ class TaskService:
             # Unreferenced UUID files remain identifiable by orphan_files().
 
     def read_asset(self, task_id: UUID, asset_id: UUID) -> tuple[Asset, bytes]:
-        task = self.get_draft(task_id)
+        # 逻辑删除隐藏任务操作，原素材仍供历史和备份完整性检查读取。
+        task = self.store.get(task_id)
+        if task is None:
+            raise TaskNotFound('任务不存在。')
         asset = next((a for a in task.assets if a.id == asset_id), None)
         if asset is None:
             raise TaskNotFound("当前任务没有该素材。")
@@ -162,15 +191,20 @@ class TaskService:
             return require_task(changes.get_task(task_id))
 
     def configure_slot(self, task_id: UUID, slot_id: UUID, reference_id: UUID | None,
-                       output_size: str, requirements: str) -> ImageSlot:
+                       output_size: str, requirements: str, expected_version: int | None = None) -> ImageSlot:
         with self.store.write() as changes:
             task = require_task(changes.get_task(task_id))
             slot = next((s for s in task.slots if s.id == slot_id), None)
             if slot is None:
                 raise TaskNotFound("当前任务没有该图位。")
+            previous = slot
             slot = slot.configure(task, reference_id, output_size, requirements)
+            if expected_version is not None and expected_version != slot.version:
+                raise Conflict('图位数据已变化，请重新读取并核对后保存；未覆盖服务器配置。')
+            if slot == previous:
+                return slot  # 相同版本、相同内容的保存不制造新的配置版本。
             changes.update_slot(slot)
-        return slot
+            return next(s for s in changes.get_task(task_id).slots if s.id == slot_id)
 
     def orphan_files(self) -> list[str]:
         return self.files.orphan_ids(self.store.asset_ids())

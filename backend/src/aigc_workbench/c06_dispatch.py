@@ -1,4 +1,4 @@
-"""One local C06/C07 dispatch worker. Existing Run identity, durable receipts, zero automatic replay."""
+"""Bounded local C06/C07 workers; durable per-slot receipts and zero automatic replay."""
 
 from concurrent.futures import ThreadPoolExecutor
 import fcntl
@@ -15,11 +15,14 @@ ACTIVE = {"QUEUED", "RUNNING", "OUTCOME_UNKNOWN"}
 
 
 class C06Dispatcher:
-    def __init__(self, database, data_dir, execute, mode="REAL"):
+    def __init__(self, database, data_dir, execute, mode="REAL", max_workers=3):
         self.database, self.execute, self.mode = database, execute, mode
         self.lock_path = data_dir / "c06-dispatch.lock"
         self.lock = None
         self.pool = None
+        if type(max_workers) is not int or not 1 <= max_workers <= 16:
+            raise ValueError('generation max_workers must be between 1 and 16')
+        self.max_workers = max_workers
 
     def start(self):
         descriptor = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
@@ -33,7 +36,7 @@ class C06Dispatcher:
             interrupted = db.execute("SELECT * FROM c06_dispatches WHERE state IN ('QUEUED','RUNNING')").fetchall()
         for receipt in interrupted:
             self._finish(dict(receipt), interrupted=True)
-        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="c06-local")
+        self.pool = ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix="c06-local")
 
     def close(self):
         if self.pool:
@@ -46,11 +49,12 @@ class C06Dispatcher:
             row = db.execute("SELECT * FROM c06_dispatches WHERE operation_id=?", (str(operation_id),)).fetchone()
         return dict(row) if row else None
 
-    def replay(self, operation_id, task_id, slot_id, quote_token, budget):
+    def replay(self, operation_id, task_id, slot_id, quote_token, budget=None):
         old = self.find(operation_id)
         if old and any(old[key] != str(value) for key, value in {
-                "task_id": task_id, "slot_id": slot_id, "quote_token": quote_token, "max_cost_usd": budget}.items()):
-            raise Conflict("同一生图操作不能改变图位、制作依据或费用门槛。")
+                "task_id": task_id, "slot_id": slot_id, "quote_token": quote_token,
+                **({"max_cost_usd": budget} if budget is not None else {})}.items()):
+            raise Conflict("同一生图操作不能改变图位、制作依据或执行策略。")
         return old
 
     def submit(self, operation_id, task_id, slot_id, snapshot_id, quote_token, budget, *, initial_progress=None):
@@ -62,6 +66,10 @@ class C06Dispatcher:
                 old = db.execute("SELECT * FROM c06_dispatches WHERE operation_id=?", (str(operation_id),)).fetchone()
                 if old:
                     return self.replay(operation_id, task_id, slot_id, quote_token, budget)
+                # 删除可能在快照准备之后发生；在同一写事务内重新检查，避免误付费。
+                task = db.execute('SELECT deleted_at FROM task_drafts WHERE id=?', (str(task_id),)).fetchone()
+                if task is None or task['deleted_at'] is not None:
+                    raise Conflict('任务已删除，未提交模型调用。')
                 if db.execute("SELECT id FROM c01_model_runs WHERE operation_id=?", (str(operation_id),)).fetchone():
                     raise Conflict("操作身份已用于历史模型执行，不能重新提交为新生图。")
                 db.execute("INSERT INTO c06_dispatches "

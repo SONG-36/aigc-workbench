@@ -5,7 +5,7 @@ import { generateImage, getSlotWorkspace, reviseImage, type RevisionQuote, type 
 import type { ImageSlot, TaskDraft } from '../types'
 
 /** Reads may poll; a paid POST only occurs once inside the explicit submit action. */
-export function useSlotGeneration(task: TaskDraft, slot: ImageSlot) {
+export function useSlotGeneration(task: TaskDraft, slot: ImageSlot, refreshToken=0) {
   const [data, setData] = useState<SlotWorkspace | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -28,7 +28,7 @@ export function useSlotGeneration(task: TaskDraft, slot: ImageSlot) {
           pendingOperation.current = null; setUncertain(false)
         }
         setError(null)
-        if (pendingOperation.current || next.executions.some(e => e.state === 'RUNNING')) {
+        if (pendingOperation.current || next.executions.some(e => e.state === 'RUNNING'||e.state==='QUEUED')) {
           timer = setTimeout(() => void read(), 1500)
         }
       } catch (cause) {
@@ -39,10 +39,10 @@ export function useSlotGeneration(task: TaskDraft, slot: ImageSlot) {
     }
     void read()
     return () => { controller.abort(); clearTimeout(timer) }
-  }, [task.id, slot.id, slot.reference_asset_id, slot.output_size, slot.requirements, task.assets.length, task.overall_requirement?.version, revision])
+  }, [task.id, slot.id, slot.reference_asset_id, slot.output_size, slot.requirements, slot.version, task.assets.length, task.overall_requirement?.version, revision,refreshToken])
 
   async function send(quote?: RevisionQuote) {
-    if (locked.current || uncertain || (quote ? !data?.can_request_revision : !data?.readiness.can_generate || !data.readiness.quote_token)) return
+    if (locked.current || pendingOperation.current || uncertain || (quote ? !data?.can_request_revision : !data?.readiness.can_generate || !data.readiness.quote_token)) return
     locked.current = true
     const operation = newOperationId()
     pendingOperation.current = operation

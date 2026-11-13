@@ -31,6 +31,12 @@ class SaveOverallRequirementRequest(BaseModel):
     operation_id: UUID
 
 
+class RenameTaskRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    title: str = Field(strict=True, min_length=1, max_length=120)
+    expected_title: str = Field(strict=True, min_length=1, max_length=120)
+
+
 class CreateSlotRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: SlotKind
@@ -42,6 +48,7 @@ class ConfigureSlotRequest(BaseModel):
     reference_asset_id: UUID | None
     output_size: OutputSize
     requirements: str = Field(strict=True, max_length=2000)
+    expected_version: int = Field(default=0, strict=True, ge=0)
 
 
 class AssetResponse(BaseModel):
@@ -76,6 +83,8 @@ class SlotResponse(BaseModel):
     requirements: str
     inputs_ready: bool
     archived: bool
+    version: int
+    generation_blocked_reason: str | None
 
 
 class TaskResponse(BaseModel):
@@ -90,6 +99,8 @@ class TaskResponse(BaseModel):
     overall_requirement: dict
     assets: list[AssetResponse]
     slots: list[SlotResponse]
+    can_delete: bool
+    delete_blocked_reason: str | None
 
     @classmethod
     def from_task(cls, task: Task) -> "TaskResponse":
@@ -97,13 +108,16 @@ class TaskResponse(BaseModel):
             id=task.id, title=task.title, mode=task.mode, status=task.status,
             can_generate=task.can_generate, materials_ready=task.materials_ready,
             readiness_reason=task.readiness_reason, created_at=task.created_at,
+            can_delete=task.deleted_at is None and not task.has_unresolved_execution,
+            delete_blocked_reason=task.delete_blocked_reason,
             overall_requirement=(task.overall_requirement.projection() if task.overall_requirement else {
                 "id": None, "task_id": str(task.id), "version": 0, "text": "", "scope": "TASK_ALL_SLOTS", "saved_at": None,
                 "source": "NOT_PROVIDED"}),
             assets=[AssetResponse.from_asset(a) for a in task.assets],
             slots=[SlotResponse(id=s.id, task_id=s.task_id, kind=s.kind, position=s.position,
                                 reference_asset_id=s.reference_asset_id, output_size=s.output_size,
-                                requirements=s.requirements, inputs_ready=task.slot_inputs_ready(s), archived=s.archived)
+                                requirements=s.requirements, inputs_ready=task.slot_inputs_ready(s), archived=s.archived, version=s.version,
+                                generation_blocked_reason=task.slot_generation_blocked_reason(s))
                    for s in task.slots],
         )
 
@@ -139,8 +153,9 @@ class GenerateImageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation_id: UUID
     quote_token: str = Field(strict=True, pattern=r"^[a-f0-9]{64}$")
-    confirm_paid: Literal[True] | None = None  # Legacy development clients; Pilot needs no fee approval.
-    max_cost_usd: Literal["1.00"] | None = None
+    # 兼容旧客户端字段；主动 POST 即业务操作，这些字段不再构成费用门禁。
+    confirm_paid: bool | None = Field(default=None, strict=True)
+    max_cost_usd: str | None = Field(default=None, strict=True)
 
 
 class RevisionQuoteRequest(BaseModel):
@@ -228,6 +243,17 @@ def get_task(task_id: UUID, service: Service) -> TaskResponse:
     return TaskResponse.from_task(service.get_draft(task_id))
 
 
+@router.patch('/tasks/{task_id}', response_model=TaskResponse)
+def rename_task(task_id: UUID, body: RenameTaskRequest, service: Service):
+    return TaskResponse.from_task(service.rename_draft(task_id, body.title, body.expected_title))
+
+
+@router.delete('/tasks/{task_id}', status_code=204)
+def delete_task(task_id: UUID, service: Service):
+    service.delete_draft(task_id)
+    return Response(status_code=204)
+
+
 @router.put("/tasks/{task_id}/overall-requirement", response_model=TaskResponse)
 def save_overall_requirement(task_id: UUID, body: SaveOverallRequirementRequest, service: Service):
     return TaskResponse.from_task(service.save_overall_requirement(task_id, body.text, body.expected_version, body.operation_id))
@@ -268,7 +294,7 @@ def create_slot(task_id: UUID, body: CreateSlotRequest, service: Service) -> Tas
 
 @router.put("/tasks/{task_id}/slots/{slot_id}", response_model=TaskResponse)
 def configure_slot(task_id: UUID, slot_id: UUID, body: ConfigureSlotRequest, service: Service) -> TaskResponse:
-    service.configure_slot(task_id, slot_id, body.reference_asset_id, body.output_size, body.requirements)
+    service.configure_slot(task_id, slot_id, body.reference_asset_id, body.output_size, body.requirements, body.expected_version)
     return TaskResponse.from_task(service.get_draft(task_id))
 
 

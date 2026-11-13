@@ -27,7 +27,9 @@ export interface ImageSlot {
   output_size: OutputSize
   requirements: string
   inputs_ready: boolean
+  generation_blocked_reason?: string | null
   archived?: boolean
+  version?: number // 旧缓存缺省为 0；服务器响应总是携带实际版本。
 }
 
 export interface OverallRequirement {
@@ -47,4 +49,6 @@ export interface TaskDraft {
   created_at: string
   assets: Asset[]
   slots: ImageSlot[]
+  can_delete?: boolean
+  delete_blocked_reason?: string | null
 }

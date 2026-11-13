@@ -39,7 +39,7 @@ export function TaskForm(){
     return <fieldset className="slot-shell" key={slot.key} data-draft-slot-id={slot.key} data-slot-kind={slot.kind}>
      <legend>{label}</legend>
      {!fixedSlot(slot.kind)&&<button className="button-quiet button-danger" type="button" disabled={busy||draft.started} onClick={()=>form.removeSlot(slot.key)}>删除{label}</button>}
-     {slot.kind==='dimensions'&&<p className="notice">仅上传已标注真实物理尺寸的专用白底素材；当前仅保存，专项确认与制作尚未开放，不允许 AI 推断尺寸。</p>}
+     {slot.kind==='dimensions'&&<p className="notice">尺寸图使用商品图和本图位营销参考直接生成；保留参考已有的尺寸数值、单位、文字和标注关系，不编造新尺寸。</p>}
      <DraftImage label={`${label}参考`} file={file} saved={saved(slot.referenceId)} expectedName={slot.fileInfo?.name}
       disabled={!form.canChoose(slot.key)} onChange={file=>form.choose(slot.key,file)}/>
      {(file||slot.referenceId)&&<button className="button-quiet" type="button" disabled={busy||draft.started} onClick={()=>form.clearReference(slot.key)}>移除{label}参考</button>}

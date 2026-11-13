@@ -41,6 +41,9 @@ class C01ModelStore:
                         or record["transport_label"] != transport_label):
                     raise C01Error("MODEL_OPERATION_CONFLICT", "RUN_START", "原操作不能更换快照、模型、参数或传输方式。")
                 return record, False
+            task = db.execute('SELECT deleted_at FROM task_drafts WHERE id=?', (snapshot['task_id'],)).fetchone()
+            if task is None or task['deleted_at'] is not None:
+                raise C01Error('TASK_DELETED', 'RUN_START', '任务已删除，不能开始新的模型调用。')
             record = {
                 "label": snapshot["capability"] + " MODEL EXECUTION", "transport_label": transport_label,
                 "run_id": str(uuid4()), "attempt_id": str(uuid4()), "operation_id": str(operation_id),
@@ -77,8 +80,9 @@ class C01ModelStore:
                 # Intent only. Actual native/final image metadata and postprocessing are
                 # recorded in structured_output only after decoding/processing succeeds.
                 record["output_plan"] = snapshot["output_plan"]
-            if budget == "UNRESTRICTED_PILOT":
-                record.update(user_max_cost_usd=None, execution_policy="UNRESTRICTED_INTERNAL_PILOT",
+            if budget in {"UNRESTRICTED_PILOT",'UNRESTRICTED_WORKSPACE'}:
+                record.update(user_max_cost_usd=None, execution_policy=("UNRESTRICTED_INTERNAL_PILOT" if budget=='UNRESTRICTED_PILOT'
+                                                                     else 'UNRESTRICTED_WORKSPACE'),
                               trigger="EXPLICIT_BUSINESS_COMMAND / UNAUTHENTICATED_OPERATOR")
             db.execute("INSERT INTO c01_model_runs VALUES (?,?,?,?,?,?,?,?)",
                        (record["run_id"], record["attempt_id"], str(operation_id), snapshot["id"],

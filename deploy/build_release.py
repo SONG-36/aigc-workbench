@@ -15,7 +15,8 @@ PATHS = ('backend/src', 'backend/requirements-runtime.lock', 'backend/pyproject.
          'docs/business/04_IMAGE_CREATION_WORK_METHOD.md',
          'docs/business/architecture/T03_CONTEXT_ENGINEERING.md', 'docs/business/architecture/T05_AI_CAPABILITIES.md',
          'frontend/src', 'frontend/package.json', 'frontend/package-lock.json', 'frontend/index.html',
-         'frontend/tsconfig.json', 'frontend/vite.config.ts')
+         'frontend/tsconfig.json', 'frontend/vite.config.ts',
+         'frontend/showcase/cases.json', 'frontend/showcase/verify-assets.ts')
 
 
 def build(destination):

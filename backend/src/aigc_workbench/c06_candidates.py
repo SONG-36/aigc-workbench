@@ -104,7 +104,7 @@ class CandidateStore:
         body = {"image_version_id": str(version_id), "candidate_id": str(candidate_id),
                 "task_id": snapshot["task_id"], "slot_id": snapshot["slot_id"], "run_id": run["run_id"],
                 "attempt_id": run["attempt_id"], "operation_id": run["operation_id"],
-                "snapshot_id": snapshot["id"], "decision_snapshot_id": snapshot["decision_snapshot_id"],
+                "snapshot_id": snapshot["id"], "decision_snapshot_id": snapshot.get("decision_snapshot_id"),
                 "product_asset_id": snapshot["product_asset_id"], "reference_asset_id": snapshot["reference_asset_id"],
                 "source_provenance": snapshot["source_provenance"], "image": asdict(metadata),
                 "file": str(target.resolve()), "status": "CANDIDATE_REVIEW_PENDING",

@@ -62,7 +62,7 @@ export function taskHttp(initial: TaskDraft) {
       }
     } else if (options?.method === 'PUT') {
       const id=path.split('/').at(-1),body=JSON.parse(options.body as string)
-      saved.slots=saved.slots.map(s=>s.id===id?{...s,...body,inputs_ready:!!body.reference_asset_id&&s.kind!=='dimensions'}:s)
+      saved.slots=saved.slots.map(s=>s.id===id?{...s,...body,inputs_ready:!!body.reference_asset_id}:s)
       saved.materials_ready = saved.slots.some(s=>!s.archived&&s.inputs_ready)
     }
     return json({...saved,...(uploaded?{uploaded_asset_id:uploaded}:{}),...(created?{created_slot_id:created}:{})}, options?.method === 'POST' ? 201 : 200)

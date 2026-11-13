@@ -96,6 +96,11 @@ class Settings:
     runtime_root: Path | None = None
     archived_runtime_root: Path | None = None
     model_service_disabled_reason: str | None = None
+    generation_max_workers: int = 3
+
+    def __post_init__(self):
+        if type(self.generation_max_workers) is not int or not 1 <= self.generation_max_workers <= 16:
+            raise ValueError('AIGC_GENERATION_MAX_WORKERS must be an integer between 1 and 16.')
 
     @property
     def database_path(self) -> Path:
@@ -119,4 +124,5 @@ class Settings:
                    tuple(filter(None, os.environ.get("AIGC_PILOT_NETWORKS", "").split(","))),
                    Path(os.environ["AIGC_FRONTEND_DIST"]).expanduser().resolve() if os.environ.get("AIGC_FRONTEND_DIST") else None,
                    Path(os.environ["AIGC_RUNTIME_ROOT"]).expanduser().resolve() if os.environ.get("AIGC_RUNTIME_ROOT") else None,
-                   Path(os.environ["AIGC_ARCHIVED_RUNTIME_ROOT"]).expanduser() if os.environ.get("AIGC_ARCHIVED_RUNTIME_ROOT") else None)
+                   Path(os.environ["AIGC_ARCHIVED_RUNTIME_ROOT"]).expanduser() if os.environ.get("AIGC_ARCHIVED_RUNTIME_ROOT") else None,
+                   generation_max_workers=int(os.environ.get('AIGC_GENERATION_MAX_WORKERS','3')))

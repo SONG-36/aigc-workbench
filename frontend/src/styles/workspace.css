@@ -61,3 +61,8 @@
 @media(max-width:800px) { .output-slots { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); } .slot-tools { display: flex; flex-wrap: wrap; gap: 4px; } .slot-tools .add-slot { width: auto; } .slot-nav-preview { display: none; } .image-actions-grid { grid-template-columns: 1fr; gap: 0; } .candidate-image img { height: 520px; } .candidate-panel { padding: 16px; } }
 
 @media(max-width:550px) { .candidate-heading { flex-wrap: wrap; } .candidate-heading > label { max-width: none; width: 100%; } }
+.batch-generation ul { list-style: none; padding: 0; }
+.batch-generation .output-controls { flex-wrap: wrap; }
+.batch-generation li { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.batch-slot-choice { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.batch-slot-choice input { width: auto; margin: 0; padding: 0; }

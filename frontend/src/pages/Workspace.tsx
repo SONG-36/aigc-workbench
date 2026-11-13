@@ -9,6 +9,7 @@ import { WriteFeedback } from '../components/WriteFeedback'
 import { useWriteAction } from '../hooks/useWriteAction'
 import { OverallRequirements } from '../components/OverallRequirements'
 import { GenerationWorkspace } from '../components/GenerationWorkspace'
+import { BatchGeneration } from '../components/BatchGeneration'
 import { StudioSidebar } from '../components/StudioSidebar'
 import { Icon } from '../components/Icon'
 import type {SlotPresentation} from '../utils/presentation'
@@ -16,6 +17,8 @@ import type { TaskDraft } from '../types'
 
 function SavedWorkspace({ initial }: { initial: TaskDraft }) {
   const [task, setTask] = useState(initial)
+  const [batchBusy,setBatchBusy]=useState(false),[generationRefresh,setGenerationRefresh]=useState(0)
+  const onBatchSubmitted=useCallback(()=>setGenerationRefresh(v=>v+1),[])
   const [slotStatus,setSlotStatus] = useState<SlotPresentation|null>(null)
   const [search,setSearch] = useSearchParams()
   const selected = task.slots.find(s=>!s.archived&&s.id===search.get('slot')) || task.slots.find(s=>!s.archived)
@@ -39,7 +42,10 @@ function SavedWorkspace({ initial }: { initial: TaskDraft }) {
   return <WorkspaceShell task={task}
     feedback={<WriteFeedback write={write}/>}
     navigation={<StudioSidebar task={task} selectedId={selected?.id} status={slotStatus} onSelect={selectSlot}><SlotTools task={task} write={write} onSaved={setTask} onSelect={selectSlot}/></StudioSidebar>}
-    output={<GenerationWorkspace task={task} slot={selected} onStatus={setSlotStatus} locked={write.locked || overallDirty} unsavedSlots={unsavedSlots} />}>
+    output={<><BatchGeneration task={task} locked={write.locked||overallDirty||unsavedSlots.size>0} onSelect={selectSlot}
+      onBusy={setBatchBusy} onSubmitted={onBatchSubmitted}/>
+      <GenerationWorkspace task={task} slot={selected} onStatus={setSlotStatus} locked={write.locked || overallDirty} generationLocked={batchBusy}
+       refreshToken={generationRefresh} unsavedSlots={unsavedSlots} /></>}>
     <details id="input-panel" className="studio-settings" open={inputOpen} onToggle={event=>setInputOpen(event.currentTarget.open)}>
       <summary><Icon name="image"/><strong>素材与制作设置</strong><span className="settings-toggle">{inputOpen?'收起':'展开'}</span></summary>
       <div className="input-content">

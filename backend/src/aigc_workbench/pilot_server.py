@@ -41,6 +41,7 @@ def settings_from_file(path):
     os.environ['AIGC_ENABLE_C07_REAL'] = '1' if enabled else '0'
     os.environ['AIGC_ENABLE_C01_REAL'] = '1' if enabled else '0'
     settings = Settings(Path(config['data_dir']), allowed_origins=(), environment='pilot', enable_c01_testing=False,
+        generation_max_workers=int(os.environ.get('AIGC_GENERATION_MAX_WORKERS', '3')),
         enable_c01_real=enabled, enable_workspace_generation=enabled, pilot_hosts=tuple(config['hosts']),
         pilot_networks=tuple(config['networks']), frontend_dist=Path(config['frontend_dist']),
         runtime_root=Path(config['runtime_root']), archived_runtime_root=Path(config['archived_runtime_root']) if config.get('archived_runtime_root') else None,

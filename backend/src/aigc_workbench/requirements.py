@@ -7,7 +7,8 @@ def effective_requirements(task: Task, slot: ImageSlot) -> dict | None:
         return None  # Preserve legacy snapshots and pure-observation request fingerprints.
     return {
         "overall": task.overall_requirement.projection(),
-        "slot": {"task_id": str(task.id), "slot_id": str(slot.id), "scope": "ONE_SLOT", "text": slot.requirements},
+        "slot": {"task_id": str(task.id), "slot_id": str(slot.id), "scope": "ONE_SLOT", "text": slot.requirements,
+                 "version": slot.version},
         "application": "C03_C04_C05 / C06 / C07; NOT C01_C02_PURE_OBSERVATION",
         "authority": "OPERATOR_REQUIREMENTS; NOT PRODUCT_FACTS_OR_CERTIFICATION",
         "inheritance": "Current requirements together with selected revision base and this feedback; no historical instruction replay.",

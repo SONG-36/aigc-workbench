@@ -126,7 +126,8 @@ describe('Workspace candidate review and controlled C06 requests (no paid API)',
     await user.dblClick(await screen.findByRole('button', { name: '生成一张候选' }))
     await screen.findByText('执行中', { selector: '[role=status]' })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    // 图位多选框属于业务选择，不是额外费用确认。
+    expect(screen.queryByRole('checkbox', {name:/费用|付费|预算/})).not.toBeInTheDocument()
     expect(api.posts()).toHaveLength(1)
     expect(JSON.parse(api.posts()[0][1].body)).toEqual({ operation_id: expect.any(String), quote_token: 'a'.repeat(64) })
     api.set({ ...initial, state: 'SUCCEEDED', candidates: [candidate], executions: [execution('SUCCEEDED')] })

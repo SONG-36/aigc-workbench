@@ -1,5 +1,5 @@
 import type {Execution} from '../api/generation'
-const labels={NOT_STARTED:'尚未开始',RUNNING:'执行中',SUCCEEDED:'成功并产生候选',FAILED:'执行失败',OUTCOME_UNKNOWN:'结果未知'}
+const labels={NOT_STARTED:'尚未开始',QUEUED:'排队中',RUNNING:'执行中',SUCCEEDED:'成功并产生候选',FAILED:'执行失败',OUTCOME_UNKNOWN:'结果未知'}
 export function ExecutionDetails({executions}:{executions:Execution[]}) {
  if(!executions.length)return null
  return <details className="execution-history"><summary>执行详情 · {executions.length} 条记录</summary>

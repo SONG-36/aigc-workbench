@@ -69,6 +69,7 @@ class ImageSlot:
     output_size: str = "1024x1536"
     requirements: str = ""
     archived: bool = False
+    version: int = 0
 
     def configure(self, task: "Task", reference_id: UUID | None,
                   output_size: str, requirements: str) -> "ImageSlot":
@@ -118,6 +119,8 @@ class Task:
     assets: tuple[Asset, ...] = ()
     slots: tuple[ImageSlot, ...] = ()
     overall_requirement: OverallRequirement | None = None
+    deleted_at: datetime | None = None
+    has_unresolved_execution: bool = False
 
     @classmethod
     def create(cls, title: str) -> "Task":
@@ -137,10 +140,24 @@ class Task:
                          max((s.position for s in self.slots), default=-1) + 1)
 
     def slot_inputs_ready(self, slot: ImageSlot) -> bool:
-        return not slot.archived and slot.kind != SlotKind.DIMENSIONS and any(a.role == AssetRole.PRODUCT_IMAGE for a in self.assets) and any(
-            a.id == slot.reference_asset_id and a.role == AssetRole.MARKETING_REFERENCE
-            for a in self.assets
-        )
+        return self.slot_generation_blocked_reason(slot) is None
+
+    def slot_generation_blocked_reason(self, slot: ImageSlot) -> str | None:
+        if slot.archived:
+            return '该图位已移除，仅保留历史。'
+        if not any(a.role == AssetRole.PRODUCT_IMAGE for a in self.assets):
+            return '请先上传并保存商品图。'
+        if slot.reference_asset_id is None:
+            return '请为本图位上传并绑定营销参考图。'
+        if not any(a.id == slot.reference_asset_id and a.role == AssetRole.MARKETING_REFERENCE for a in self.assets):
+            return '本图位绑定的参考素材不可用，请重新核对。'
+        return None
+
+    @property
+    def delete_blocked_reason(self) -> str | None:
+        if self.has_unresolved_execution:
+            return '任务有排队、执行中或结果未知的操作，请先核对执行状态，暂不能删除。'
+        return None
 
     @property
     def materials_ready(self) -> bool:

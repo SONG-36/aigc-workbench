@@ -198,7 +198,17 @@ def asset_from_row(row: sqlite3.Row) -> Asset:
 def slot_from_row(row: sqlite3.Row) -> ImageSlot:
     return ImageSlot(UUID(row["id"]), UUID(row["task_id"]), SlotKind(row["kind"]), row["position"],
                      UUID(row["reference_asset_id"]) if row["reference_asset_id"] else None,
-                     row["output_size"], row["requirements"], bool(row["archived"]))
+                     row["output_size"], row["requirements"], bool(row["archived"]), row['version'])
+
+
+def task_has_unresolved_execution(connection: sqlite3.Connection, task_id: UUID) -> bool:
+    # 连同旧执行入口检查；结果未知也不能通过删除隐藏后重新付费。
+    return connection.execute("""SELECT 1 FROM c06_dispatches
+        WHERE task_id=? AND state IN ('QUEUED','RUNNING','OUTCOME_UNKNOWN')
+        UNION ALL SELECT 1 FROM c01_model_runs r JOIN c01_snapshots s ON s.id=r.snapshot_id
+        WHERE s.task_id=? AND r.status IN ('RUNNING','OUTCOME_UNKNOWN')
+        UNION ALL SELECT 1 FROM c01_runs r JOIN c01_snapshots s ON s.id=r.snapshot_id
+        WHERE s.task_id=? AND r.status='RUNNING' LIMIT 1""", (str(task_id),)*3).fetchone() is not None
 
 
 def load_task(connection: sqlite3.Connection, task_id: UUID) -> Task | None:
@@ -213,7 +223,9 @@ def load_task(connection: sqlite3.Connection, task_id: UUID) -> Task | None:
                                      (str(task_id),)).fetchone()
     return Task(UUID(row["id"]), row["title"], datetime.fromisoformat(row["created_at"]),
                 row["mode"], row["status"], tuple(map(asset_from_row, assets)),
-                tuple(map(slot_from_row, slots)), requirement_from_row(requirement) if requirement else None)
+                tuple(map(slot_from_row, slots)), requirement_from_row(requirement) if requirement else None,
+                datetime.fromisoformat(row['deleted_at']) if row['deleted_at'] else None,
+                task_has_unresolved_execution(connection, task_id))
 
 
 class SQLiteTaskStore:
@@ -229,7 +241,7 @@ class SQLiteTaskStore:
             connection.execute("PRAGMA foreign_keys = OFF")
             connection.execute("BEGIN IMMEDIATE")
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}:
+            if version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
                 raise RuntimeError(f"Unsupported database schema version: {version}")
             if version == 0:
                 connection.execute(V1_TASKS)
@@ -276,6 +288,20 @@ class SQLiteTaskStore:
             if version == 9:
                 self._upgrade_v10(connection)
                 connection.execute("PRAGMA user_version = 10")
+                version = 10
+            if version == 10:
+                if 'version' not in {r[1] for r in connection.execute('PRAGMA table_info(image_slots)')}:
+                    connection.execute('ALTER TABLE image_slots ADD COLUMN version INTEGER NOT NULL DEFAULT 0 CHECK(version >= 0)')
+                connection.execute('PRAGMA user_version = 11')
+                version = 11
+            if version == 11:
+                if 'deleted_at' not in {r[1] for r in connection.execute('PRAGMA table_info(task_drafts)')}:
+                    connection.execute('ALTER TABLE task_drafts ADD COLUMN deleted_at TEXT')
+                if 'initial_title' not in {r[1] for r in connection.execute('PRAGMA table_info(task_creations)')}:
+                    connection.execute('ALTER TABLE task_creations ADD COLUMN initial_title TEXT')
+                # 原始创建标题不能随重命名改变，否则原 Operation 的重放会失去幂等性。
+                connection.execute('UPDATE task_creations SET initial_title=(SELECT title FROM task_drafts WHERE task_drafts.id=task_creations.task_id) WHERE initial_title IS NULL')
+                connection.execute('PRAGMA user_version = 12')
             if connection.execute("PRAGMA foreign_key_check").fetchone():
                 raise RuntimeError("Database foreign-key validation failed")
 
@@ -284,11 +310,16 @@ class SQLiteTaskStore:
         definition = V2_TABLES[2].replace("CREATE TABLE image_slots (", "CREATE TABLE image_slots_next (")
         definition = definition.replace("'main','comparison','selling_point','scene'", "'main','dimensions','comparison','selling_point','scene'")
         definition = definition.replace("requirements TEXT NOT NULL,", "requirements TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),")
-        connection.execute(definition)
         fields = 'id,task_id,operation_id,kind,position,reference_asset_id,output_size,requirements'
         old_columns = {r[1] for r in connection.execute('PRAGMA table_info(image_slots)')}
+        if 'version' in old_columns:
+            # 保留已有版本字段，兼容带附加字段的旧表恢复/迁移。
+            definition = definition.replace('archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),',
+                'archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)), version INTEGER NOT NULL DEFAULT 0 CHECK(version >= 0),')
+        connection.execute(definition)
         archived = 'archived' if 'archived' in old_columns else '0'
-        connection.execute(f'INSERT INTO image_slots_next ({fields},archived) SELECT {fields},{archived} FROM image_slots')
+        extra = ',version' if 'version' in old_columns else ''
+        connection.execute(f'INSERT INTO image_slots_next ({fields},archived{extra}) SELECT {fields},{archived}{extra} FROM image_slots')
         connection.execute('DROP TABLE image_slots')
         connection.execute('ALTER TABLE image_slots_next RENAME TO image_slots')
         connection.execute(V2_TABLES[3].replace("'main', 'comparison'", "'main', 'dimensions', 'comparison'"))
@@ -330,7 +361,7 @@ class SQLiteTaskStore:
     def list(self) -> list[Task]:
         with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN")
-            rows = connection.execute("SELECT id FROM task_drafts ORDER BY created_at DESC, id DESC")
+            rows = connection.execute("SELECT id FROM task_drafts WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC")
             ids = [UUID(row["id"]) for row in rows]
             return [load_task(connection, task_id) for task_id in ids]
 
@@ -356,8 +387,21 @@ class SQLiteChanges:
         self.connection.execute(
             "INSERT INTO task_drafts (id,title,mode,status,created_at) VALUES (?,?,?,?,?)",
             (str(task.id), task.title, task.mode, task.status, task.created_at.isoformat()))
-        self.connection.execute("INSERT INTO task_creations (operation_id,task_id,initial_overall_requirement) VALUES (?,?,?)",
-                                (str(operation_id), str(task.id), overall_requirement))
+        self.connection.execute("INSERT INTO task_creations (operation_id,task_id,initial_overall_requirement,initial_title) VALUES (?,?,?,?)",
+                                (str(operation_id), str(task.id), overall_requirement, task.title))
+
+    def creation_title(self, operation_id: UUID) -> str:
+        return self.connection.execute('SELECT initial_title FROM task_creations WHERE operation_id=?', (str(operation_id),)).fetchone()[0]
+
+    def rename_task(self, task_id: UUID, title: str, expected_title: str) -> None:
+        changed = self.connection.execute('UPDATE task_drafts SET title=? WHERE id=? AND title=? AND deleted_at IS NULL',
+                                          (title, str(task_id), expected_title)).rowcount
+        if changed != 1:
+            from .domain import Conflict
+            raise Conflict('任务名称已变化或任务已删除，请刷新列表后再编辑。')
+
+    def soft_delete_task(self, task_id: UUID, deleted_at: str) -> None:
+        self.connection.execute('UPDATE task_drafts SET deleted_at=? WHERE id=? AND deleted_at IS NULL', (deleted_at, str(task_id)))
 
     def asset_upload(self, task_id: UUID, operation_id: UUID) -> Asset | None:
         row = self.connection.execute("SELECT * FROM assets WHERE task_id = ? AND operation_id = ?",
@@ -389,11 +433,14 @@ class SQLiteChanges:
              slot.output_size, slot.requirements))
 
     def update_slot(self, slot: ImageSlot) -> None:
-        self.connection.execute(
-            """UPDATE image_slots SET reference_asset_id = ?, output_size = ?, requirements = ?
-               WHERE id = ? AND task_id = ?""",
+        changed = self.connection.execute(
+            """UPDATE image_slots SET reference_asset_id = ?, output_size = ?, requirements = ?, version = version + 1
+               WHERE id = ? AND task_id = ? AND version = ?""",
             (str(slot.reference_asset_id) if slot.reference_asset_id else None,
-             slot.output_size, slot.requirements, str(slot.id), str(slot.task_id)))
+             slot.output_size, slot.requirements, str(slot.id), str(slot.task_id), slot.version)).rowcount
+        if changed != 1:
+            from .domain import Conflict
+            raise Conflict('图位数据已变化，请重新读取并核对后保存；未覆盖服务器配置。')
 
 
     def creation_requirement(self, operation_id: UUID) -> str:

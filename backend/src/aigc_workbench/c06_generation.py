@@ -293,6 +293,10 @@ class C06Service(C01RealService):
 
     def preflight(self, snapshot_id: UUID, model: str, max_output_tokens: int = 4096) -> dict:
         snapshot = self.service.evidence.load_snapshot(snapshot_id)
+        # 新直生图仍是 C06；旧 CLI/读取入口可以校验它，不要求伪造 C03 决定。
+        if snapshot['context'].get('version') == 'quick-a-direct-v1':
+            from .quick_a_direct import QuickADirectService
+            return QuickADirectService(self.settings, self.service, test_mode=self.test_mode).preflight(snapshot_id, model)
         plan = snapshot_output_plan(snapshot)
         if (model != self.image_model or snapshot.get("capability") != "C06" or snapshot.get("parameters") != image_parameters(plan, self.image_model)
                 or fingerprint(snapshot["context"]) != snapshot["context_sha256"]):
@@ -377,7 +381,8 @@ class C06Service(C01RealService):
             max_cost_usd: str, transport=None) -> dict:
         from .bailian_model import IMAGE_MODEL, POLICY, BailianTransport
         bailian = self.image_model == IMAGE_MODEL and max_cost_usd == POLICY
-        pilot = self.settings.environment == "pilot" and max_cost_usd == "UNRESTRICTED_PILOT"
+        pilot = (self.settings.environment in {'pilot','development'} and self.settings.enable_workspace_generation
+                 and max_cost_usd in {"UNRESTRICTED_PILOT",'UNRESTRICTED_WORKSPACE'})
         try:
             budget = Decimal(max_cost_usd)
             valid_budget = budget.is_finite() and 0 < budget <= 1

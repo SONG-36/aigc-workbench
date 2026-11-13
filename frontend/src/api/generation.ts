@@ -1,6 +1,6 @@
 import { ApiError, request } from './tasks'
 
-export type ExecutionState = 'NOT_STARTED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'OUTCOME_UNKNOWN'
+export type ExecutionState = 'NOT_STARTED' | 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'OUTCOME_UNKNOWN'
 export interface Candidate {
   image_version_id: string; candidate_id: string; task_id: string; slot_id: string; run_id: string
   created_at: string; product_asset_id: string; reference_asset_id: string
@@ -43,7 +43,7 @@ export interface SlotWorkspace {
   can_request_revision?: boolean; reviews?: ImageReview[]
   delivery?: (ImageReview & { url: string }) | null
 }
-const states = ['NOT_STARTED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'OUTCOME_UNKNOWN']
+const states = ['NOT_STARTED', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'OUTCOME_UNKNOWN']
 
 export async function getSlotWorkspace(taskId: string, slotId: string, signal?: AbortSignal): Promise<SlotWorkspace> {
   const value = await request(`/tasks/${taskId}/slots/${slotId}/workspace`, { signal }) as SlotWorkspace

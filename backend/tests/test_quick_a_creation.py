@@ -29,7 +29,26 @@ def config(tmp_path, monkeypatch):
 
 
 def application(config, understanding, images):
-    return create_app(config, generation_transport=images, understanding_transport=understanding)
+    # 本文件保留历史多阶段回归；新默认路径由 test_quick_a_direct 直接使用 create_app 验证。
+    from contextlib import asynccontextmanager
+    app = create_app(config, generation_transport=images, understanding_transport=understanding)
+    original = app.router.lifespan_context
+    @asynccontextmanager
+    async def legacy_lifespan(app):
+        async with original(app):
+            service = app.state.generation_service
+            service._select = service._select_legacy
+            yield
+    app.router.lifespan_context = legacy_lifespan
+    return app
+
+
+def save_slot(client, path, values):
+    # 现有业务回归显式读取当前版本；并发测试单独提交保留的旧版本。
+    task_id, slot_id = path.split('/')[3], path.split('/')[5]
+    task = client.get('/api/tasks/'+task_id).json()
+    version = next((s['version'] for s in task.get('slots',[]) if s['id']==slot_id),0)
+    return client.request('PUT',path,json={**values,'expected_version':version})
 
 
 def asset(client, task_id, role, color):
@@ -51,7 +70,7 @@ def new_task(client, size='1536x1536', kind='main'):
     slot = response.json()['slots'][-1]
     path = f'/api/tasks/{task}/slots/{slot["id"]}'
     config = {'reference_asset_id': reference['id'], 'output_size': size, 'requirements': 'TEST_ONLY preserve the supplied badge'}
-    assert client.put(path, json=config).status_code == 200
+    assert save_slot(client, path, config).status_code == 200
     return path, task, slot['id'], (product, reference), (product_bytes, reference_bytes), config
 
 
@@ -67,6 +86,92 @@ def submit(client, path, operation=None):
 def image_bytes(request):
     parts = request['images'] if 'images' in request else request['input'][0]['content'][1:]
     return [base64.b64decode(p['image_url'].split(',', 1)[1]) for p in parts]
+
+
+def test_c01_debug_prints_only_first_call_without_secrets_or_image_data(config, monkeypatch, capsys):
+    secret = 'TEST_ONLY_DEBUG_API_KEY_CANARY'
+    image_data = 'QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo='
+    monkeypatch.setenv('AIGC_DEBUG_C01', '1')
+    monkeypatch.setenv('OPENAI_API_KEY', secret)
+
+    class EchoCanaries(UnderstandingSubstitute):
+        def send(self, payload):
+            response = super().send(payload)
+            if json.loads(payload)['text']['format']['name'] == 'c01_visual_observation':
+                body = json.loads(response.body)
+                part = body['output'][0]['content'][0]
+                parsed = json.loads(part['text'])
+                parsed['uncertainties'] = [secret, 'Bearer PRIVATE_TOKEN_CANARY',
+                    'data:image/png;base64,' + image_data]
+                part['text'] = json.dumps(parsed)
+                return type(response)(response.status, json.dumps(body).encode(), response.request_id)
+            return response
+
+    understanding, images = EchoCanaries(), ImageSubstitute()
+    app = application(config, understanding, images)
+    with TestClient(app, base_url='http://localhost') as client:
+        path, task, slot, *_ = new_task(client)
+        submit(client, path); body = finish(client, path)
+        assert body['state'] == 'SUCCEEDED', body
+        first = body['executions'][0]['progress']['steps'][0]
+        record = app.state.generation_service.runs.inspect(UUID(first['run_id']))
+        # Debug output must not redact or otherwise rewrite persisted model Evidence.
+        assert record['structured_output']['content']['uncertainties'][0] == secret
+        assert record['actual_test_adapter_input']['request'] == understanding.requests[0]
+    output = capsys.readouterr().err
+    headers = [line for line in output.splitlines() if '[QUICK_A_C01_DEBUG]' in line]
+    assert len(headers) == 6 and all(f'Task={task} ImageSlot={slot} Step=C01' in h for h in headers)
+    for label in ['INPUT', 'PROMPT', 'RESPONSE', 'PARSED RESULT', 'DECISION', 'NEXT STEP INPUT']:
+        assert any(h.endswith(' ' + label) for h in headers)
+    assert understanding.requests[0]['input'][0]['content'][0]['text'] in output
+    assert 'OFFLINE_TRANSPORT_TEST' in output and 'C02 does not consume C01 output' in output
+    assert secret not in output and 'PRIVATE_TOKEN_CANARY' not in output and image_data not in output
+    assert understanding.requests[0]['input'][0]['content'][1]['image_url'] not in output
+    assert len(understanding.requests) == 3 and len(images.requests) == 1
+
+
+@pytest.mark.parametrize('environment,flag,capability', [
+    ('development', '0', 'C01'), ('production', '1', 'C01'),
+    ('pilot', '1', 'C01'), ('development', '1', 'C02'),
+])
+def test_c01_debug_is_silent_without_local_opt_in(config, monkeypatch, capsys, environment, flag, capability):
+    from dataclasses import replace
+    from aigc_workbench.c01_real import C01RealService
+    service = object.__new__(C01RealService)
+    service.settings = replace(config, environment=environment)
+    monkeypatch.setenv('AIGC_DEBUG_C01', flag)
+    # Empty inputs are deliberate: disabled logging must not inspect private payloads.
+    service._debug_c01('RESPONSE', {'capability': capability}, {}, 'PRIVATE_PAYLOAD_CANARY')
+    service._debug_c01_return({'capability': capability}, {})
+    assert capsys.readouterr().err == ''
+
+
+def test_c01_debug_marks_cached_result_without_claiming_a_new_call(config, monkeypatch, capsys):
+    monkeypatch.setenv('AIGC_DEBUG_C01', '1')
+    understanding, images = UnderstandingSubstitute(), ImageSubstitute()
+    with TestClient(application(config, understanding, images), base_url='http://localhost') as client:
+        path, _, _, _, _, values = new_task(client)
+        submit(client, path); assert finish(client, path)['state'] == 'SUCCEEDED'
+        capsys.readouterr()
+        save_slot(client, path, {**values, 'requirements': 'TEST_ONLY new slot requirement'}).raise_for_status()
+        submit(client, path); assert finish(client, path)['state'] == 'SUCCEEDED'
+    output = capsys.readouterr().err
+    assert 'REUSE_SAVED_RUN_NO_MODEL_CALL' in output and 'NEXT STEP INPUT' in output
+    assert '] Task=' in output and ' Step=C01 ' in output
+    assert ' PROMPT\n' not in output and ' RESPONSE\n' not in output
+    assert len(understanding.requests) == 4 and len(images.requests) == 2
+
+
+def test_c01_debug_keeps_failed_response_separate_from_a_parsed_result(config, monkeypatch, capsys):
+    monkeypatch.setenv('AIGC_DEBUG_C01', '1')
+    understanding, images = UnderstandingSubstitute(fail='c01_visual_observation'), ImageSubstitute()
+    with TestClient(application(config, understanding, images), base_url='http://localhost') as client:
+        path, *_ = new_task(client)
+        submit(client, path); assert finish(client, path)['state'] == 'FAILED'
+    output = capsys.readouterr().err
+    assert 'TEST_ONLY_FAILURE' in output and 'PARSED RESULT\nnull' in output
+    assert 'STOP_FAILED_OR_UNKNOWN_C01' in output and '"continuation_allowed": false' in output
+    assert len(understanding.requests) == 1 and not images.requests
 
 
 @pytest.mark.parametrize('size', ['1024x1536', '1536x1536'])
@@ -123,14 +228,14 @@ def test_effective_requirement_and_source_changes_reuse_only_valid_understanding
         path, task, slot, assets, originals, values = new_task(client)
         submit(client, path); first = finish(client, path)
         values['requirements'] = 'TEST_ONLY new explicit requirement'
-        assert client.put(path, json=values).status_code == 200
+        assert save_slot(client, path, values).status_code == 200
         submit(client, path); second = finish(client, path)
         assert second['state'] == 'SUCCEEDED', second
         assert len(understanding.requests) == 4
         assert [s['reused'] for s in second['executions'][0]['progress']['steps']] == [True, True, False, False]
         assert first['candidates'][0]['image_version_id'] in [c['image_version_id'] for c in second['candidates']]
         reference, ref_bytes = asset(client, task, 'marketing_reference', 'green')
-        values['reference_asset_id'] = reference['id']; client.put(path, json=values)
+        values['reference_asset_id'] = reference['id']; save_slot(client, path, values)
         submit(client, path); third = finish(client, path)
         assert third['state'] == 'SUCCEEDED', third
         assert len(understanding.requests) == 6 and image_bytes(images.requests[-1]) == [originals[0], ref_bytes]
@@ -216,10 +321,10 @@ def test_stale_quote_and_cross_task_binding_cannot_start_a_model(config):
     with TestClient(application(config, understanding, images), base_url='http://localhost') as client:
         path, task, _, assets, _, values = new_task(client)
         ready = client.get(path + '/workspace').json()['readiness']
-        values['requirements'] = 'changed'; client.put(path, json=values)
+        values['requirements'] = 'changed'; save_slot(client, path, values)
         assert client.post(path + '/generations', json={'operation_id': str(uuid4()), 'quote_token': ready['quote_token']}).status_code == 409
         other, _, _, other_assets, _, _ = new_task(client)
-        assert client.put(path, json={**values, 'reference_asset_id': other_assets[1]['id']}).status_code == 422
+        assert save_slot(client, path, {**values, 'reference_asset_id': other_assets[1]['id']}).status_code == 422
         assert not understanding.requests and not images.requests
 
 
@@ -245,7 +350,7 @@ def test_changed_requirements_during_understanding_stop_later_calls(config):
         submit(client, path)
         try:
             assert entered.wait(3)
-            client.put(path, json={**values, 'requirements': 'CHANGED_WHILE_RUNNING'})
+            save_slot(client, path, {**values, 'requirements': 'CHANGED_WHILE_RUNNING'})
         finally: release.set()
         body = finish(client, path)
         assert body['state'] == 'FAILED' and not body['candidates']
@@ -295,7 +400,7 @@ def test_v8_migration_rolls_back_and_preserves_v7_business_and_evidence(config, 
         assert 'progress_json' not in [r[1] for r in db.execute('PRAGMA table_info(c06_dispatches)')]
     monkeypatch.setattr(persistence, 'V8_TABLES', statements); database.initialize()
     with database.connection() as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0] == 10
+        assert db.execute('PRAGMA user_version').fetchone()[0] == 12
         for name, rows in before.items(): assert [tuple(r) for r in db.execute('SELECT * FROM ' + name)] == rows
 
 

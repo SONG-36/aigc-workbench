@@ -94,6 +94,8 @@ class QuickACreation:
         self.steps.append(step); self._progress(capability)
         if cached:
             run = cached
+            if capability == 'C01':
+                service._debug_c01_return(snapshot, run, reused=True)
         elif capability == 'C06':
             run = service.run(UUID(snapshot['id']), model, operation, confirmed=True, max_cost_usd=self.budget,
                               transport=self.image_transport)
@@ -117,6 +119,7 @@ class QuickACreation:
         task, slot = UUID(state['task_id']), UUID(state['slot_id'])
         product, reference = UUID(state['product_asset_id']), UUID(state['reference_asset_id'])
         c01 = ProductUnderstandingService(self.settings, self.service)
+        c01.debug_slot_id = slot
         product_run = self._step('C01', c01, lambda: self.service.prepare(task, product,
             source_reason='Workspace显式生成操作解析当前最新上传商品图；界面展示实际来源。'), cache=True)
         c02 = C02RealService(self.settings, self.service)
