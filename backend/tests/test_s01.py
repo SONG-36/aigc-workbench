@@ -85,7 +85,7 @@ def test_v1_upgrade_preserves_identity_fields_and_supports_new_operations(settin
         assert slot_id != reference["id"]
         assert bind(client, identity, slot_id, reference["id"]).status_code == 200
     with sqlite3.connect(settings.database_path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 13
         assert db.execute("SELECT id,title,created_at FROM task_drafts").fetchone() == (
             identity, "existing F01", created)
     with TestClient(create_app(settings), base_url="http://localhost") as restarted:

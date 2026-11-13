@@ -516,6 +516,16 @@ C06/C07 继续使用 `gpt-image-2.6-sunburst` 与原 Images Edits 接口。开�
 - 本地终端逐步日志使用 `AIGC_ENV=development AIGC_DEBUG_QUICK_A=1`；只输出脱敏的八步执行信息，不打印图片 Base64 或凭证。模型执行开关默认仍为关闭，详见现有启动说明。
 - 必要离线回归：`backend/.venv/bin/python -m pytest backend/tests -rxX`、`npm --prefix frontend test`、`npm --prefix frontend run build`。测试全部使用 Fake/Mock；既有 XFAIL 表示 `TaskService.get_draft` 仍加载兄弟 Slot 元数据，未实现严格不读取，但实际模型输入隔离由专项断言验证。离线通过不代表真实成图质量验收。
 
+### Quick-B V1：不同商品参考的换主体生图
+
+首页点击“新建 Quick-B”，或在新建页选择 Quick-B；上传实售商品图、各图位参考及可选要求，保存后进入同一个工作台。可逐图生成、勾选多图或生成全部有效图位；生成数量与 `AIGC_GENERATION_MAX_WORKERS` 的并发上限独立。
+
+业务实现独立位于 `backend/src/aigc_workbench/quickb.py`：`read_inputs → build_prompt → prepare → preflight → run`。一次 C06 图片调用完整替换参考中的商品主体、特写、配件和场景商品细节，保留运营默认认可的适用营销内容；明确重要参数冲突只定点处理，不增加普遍人工确认门禁。Quick-A 核心实现保持独立，没有统一 `quick_direct.py` 或 C01～C05 调用。
+
+C07 继续使用选定基础版本的商品来源、当前 Slot 参考及有效要求，并保留 Quick-B 换主体规则，避免修改时重新混入参考商品。候选、人工 Pass/Reject、任务菜单、要求版本与 Slot 并发保护均复用已有机制。数据库 V13 仅扩展原 Task 的模式约束，迁移失败事务回滚；旧 Quick-A 行、关系和执行证据保留。
+
+专项离线测试见 `backend/tests/test_quick_b.py` 和 `frontend/src/test/quickB.test.tsx`。Fake/Mock 能验证请求、来源、并发和保存行为，实际主体替换完整性、文字/规格保真与冲突处理质量仍需真实模型和运营验收。
+
 ### C01 本地终端调试：保留的独立/历史步骤
 
 `AIGC_ENV=development AIGC_DEBUG_C01=1` 时，C01 在终端 stderr 打印

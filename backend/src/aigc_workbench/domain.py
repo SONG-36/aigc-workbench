@@ -123,8 +123,10 @@ class Task:
     has_unresolved_execution: bool = False
 
     @classmethod
-    def create(cls, title: str) -> "Task":
-        return cls(uuid4(), cls.normalize_title(title), datetime.now(timezone.utc))
+    def create(cls, title: str, mode: str = "quick_a") -> "Task":
+        if mode not in {"quick_a", "quick_b"}:
+            raise InvalidTask("任务模式须为 Quick-A 或 Quick-B。")
+        return cls(uuid4(), cls.normalize_title(title), datetime.now(timezone.utc), mode=mode)
 
     @staticmethod
     def normalize_title(title: str) -> str:

@@ -21,6 +21,7 @@ class CreateTaskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(strict=True)
     operation_id: UUID
+    mode: Literal["quick_a", "quick_b"] = "quick_a"
     overall_requirements: str = Field(default="", strict=True, max_length=2000)
 
 
@@ -90,7 +91,7 @@ class SlotResponse(BaseModel):
 class TaskResponse(BaseModel):
     id: UUID
     title: str
-    mode: Literal["quick_a"]
+    mode: Literal["quick_a", "quick_b"]
     status: Literal["draft"]
     can_generate: Literal[False]
     materials_ready: bool
@@ -225,12 +226,12 @@ def candidate_content(task_id: UUID, slot_id: UUID, version_id: UUID, service: G
 
 @router.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "scope": "Quick-A workspace; controlled C06 generation"}
+    return {"status": "ok", "scope": "Quick-A/Quick-B workspace; controlled C06 generation"}
 
 
 @router.post("/tasks", response_model=TaskResponse, status_code=201)
 def create_task(body: CreateTaskRequest, service: Service) -> TaskResponse:
-    return TaskResponse.from_task(service.create_draft(body.title, body.operation_id, body.overall_requirements))
+    return TaskResponse.from_task(service.create_draft(body.title, body.operation_id, body.overall_requirements, body.mode))
 
 
 @router.get("/tasks", response_model=list[TaskResponse])

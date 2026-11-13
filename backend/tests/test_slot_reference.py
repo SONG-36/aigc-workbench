@@ -110,6 +110,6 @@ def test_v10_migration_rollback_and_foreign_key_preservation(config,monkeypatch)
   assert 'archived' not in [r[1] for r in db.execute('pragma table_info(image_slots)')]
  monkeypatch.setattr(SQLiteTaskStore,'_upgrade_v10',original);database.initialize()
  with database.connection() as db:
-  assert db.execute('pragma user_version').fetchone()[0]==12 and not db.execute('pragma foreign_key_check').fetchall()
+  assert db.execute('pragma user_version').fetchone()[0]==13 and not db.execute('pragma foreign_key_check').fetchall()
   for n,(cols,rows) in old.items():assert [tuple(r) for r in db.execute('select '+','.join(cols)+' from '+n)]==rows
   assert db.execute('pragma foreign_keys').fetchone()[0]==1

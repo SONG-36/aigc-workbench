@@ -61,6 +61,8 @@ function SavedWorkspace({ initial }: { initial: TaskDraft }) {
 
 export function Workspace() {
   const { taskId } = useParams()
+  const [params,setParams]=useSearchParams()
+  const mode=params.get('mode')==='quick_b'?'quick_b':'quick_a'
   const [task, setTask] = useState<TaskDraft | null>(null)
   const [loading, setLoading] = useState(Boolean(taskId))
   const [error, setError] = useState<string | null>(null)
@@ -77,5 +79,5 @@ export function Workspace() {
   if (loading) return <p role="status">正在从服务器恢复任务…</p>
   if (error) return <p role="alert" className="error">{error} 请返回任务中心核对。</p>
   if (taskId) return task && task.id === taskId ? <SavedWorkspace key={task.id} initial={task} /> : null
-  return <WorkspaceShell task={null}><TaskForm /></WorkspaceShell>
+  return <WorkspaceShell task={null} mode={mode} onModeChange={next=>setParams({mode:next})}><TaskForm key={mode} mode={mode}/></WorkspaceShell>
 }

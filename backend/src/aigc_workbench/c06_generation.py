@@ -293,6 +293,9 @@ class C06Service(C01RealService):
 
     def preflight(self, snapshot_id: UUID, model: str, max_output_tokens: int = 4096) -> dict:
         snapshot = self.service.evidence.load_snapshot(snapshot_id)
+        if snapshot['context'].get('version') == 'quick-b-direct-v1':
+            from .quickb import QuickBService
+            return QuickBService(self.settings, self.service, test_mode=self.test_mode).preflight(snapshot_id, model)
         # 新直生图仍是 C06；旧 CLI/读取入口可以校验它，不要求伪造 C03 决定。
         if snapshot['context'].get('version') == 'quick-a-direct-v1':
             from .quick_a_direct import QuickADirectService

@@ -41,7 +41,7 @@ export interface TaskDraft {
   id: string
   title: string
   overall_requirement?: OverallRequirement
-  mode: 'quick_a'
+  mode: 'quick_a' | 'quick_b'
   status: 'draft'
   can_generate: false
   materials_ready: boolean

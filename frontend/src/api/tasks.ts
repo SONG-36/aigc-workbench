@@ -28,7 +28,7 @@ export async function request(path: string, options: RequestInit = {}): Promise<
 function decodeTask(value: unknown): TaskDraft {
   const t = value as Partial<TaskDraft> | null
   if (!t || typeof t.id !== 'string' || typeof t.title !== 'string'
-    || t.mode !== 'quick_a' || t.status !== 'draft' || t.can_generate !== false
+    || !['quick_a','quick_b'].includes(t.mode || '') || t.status !== 'draft' || t.can_generate !== false
     || typeof t.materials_ready !== 'boolean' || typeof t.readiness_reason !== 'string'
     || typeof t.created_at !== 'string' || !Array.isArray(t.assets) || !Array.isArray(t.slots)
     || (t.can_delete!==undefined&&typeof t.can_delete!=='boolean')
@@ -55,14 +55,18 @@ function decodeTask(value: unknown): TaskDraft {
     saved_at: null, source: 'NOT_PROVIDED'}} as TaskDraft
 }
 
-export async function createQuickADraft(title: string, operationId: string, overallRequirements = ''): Promise<TaskDraft> {
+export async function createTaskDraft(title: string, operationId: string, overallRequirements = '', mode:TaskDraft['mode']='quick_a'): Promise<TaskDraft> {
   const task = decodeTask(await request('/tasks', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, operation_id: operationId, ...(overallRequirements ? {overall_requirements: overallRequirements} : {}) }),
+    body: JSON.stringify({ title, operation_id: operationId, ...(mode==='quick_b'?{mode}:{}), ...(overallRequirements ? {overall_requirements: overallRequirements} : {}) }),
   }))
-  if (task.overall_requirement?.text !== overallRequirements) throw new ApiError('服务器未确认本次整体要求已保存，请核对任务；输入仍保留。', 'unknown')
+  if (task.mode!==mode || task.overall_requirement?.text !== overallRequirements) throw new ApiError('服务器未确认本次模式或整体要求已保存，请核对任务；输入仍保留。', 'unknown')
   return task
 }
+
+// 保留 Quick-A 现有调用名称及请求内容，任务创建本身仍复用同一个 API。
+export const createQuickADraft = (title:string,operationId:string,overallRequirements='') =>
+  createTaskDraft(title,operationId,overallRequirements,'quick_a')
 
 export async function getTask(id: string, signal?: AbortSignal): Promise<TaskDraft> {
   return decodeTask(await request(`/tasks/${encodeURIComponent(id)}`, { signal }))

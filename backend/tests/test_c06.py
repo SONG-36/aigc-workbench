@@ -177,5 +177,5 @@ def test_v4_upgrade_rolls_back_on_error_and_preserves_existing_records(generatio
     monkeypatch.setattr(persistence,'V5_TABLES',original)
     database.initialize()
     with database.connection() as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0]==12
+        assert db.execute('PRAGMA user_version').fetchone()[0]==13
         for name,rows in before.items(): assert [tuple(row) for row in db.execute('SELECT * FROM '+name)]==rows

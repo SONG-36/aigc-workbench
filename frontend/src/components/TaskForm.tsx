@@ -1,7 +1,7 @@
 import {useEffect,useState} from 'react'
 import {Link} from 'react-router-dom'
 import {useNewQuickATask} from '../hooks/useNewQuickATask'
-import {OUTPUT_SIZES,type Asset,type OutputSize} from '../types'
+import {OUTPUT_SIZES,type Asset,type OutputSize,type TaskDraft} from '../types'
 import {fixedSlot,slotTitle} from '../utils/slotTypes'
 import {ReferenceImage} from './ReferenceImage'
 import {FilePicker} from './FilePicker'
@@ -19,8 +19,8 @@ function DraftImage({label,file,saved,expectedName,disabled,onChange}:{label:str
   {!present&&expectedName&&<p className="notice">{expectedName} 尚未恢复，请重新选择同一原始文件</p>}
  </section>
 }
-export function TaskForm(){
- const form=useNewQuickATask(),{draft,files,task,busy,hydrating,error}=form
+export function TaskForm({mode='quick_a'}:{mode?:TaskDraft['mode']}){
+ const form=useNewQuickATask(mode),{draft,files,task,busy,hydrating,error}=form
  const saved=(id:string|null)=>task?.assets.find(a=>a.id===id)
  return <form onSubmit={e=>{e.preventDefault();void form.save()}} className="draft-form">
   <nav className="form-jump-links" aria-label="新建任务页内导航"><a href="#task-materials">商品素材</a><a href="#slot-references">图位参考</a><a href="#overall-requirements">整体要求</a><a href="#save-task">前往保存<Icon name="arrow"/></a></nav>

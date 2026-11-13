@@ -173,7 +173,7 @@ def test_schema_11_upgrade_preserves_rows_and_creation_title(config):
         before={table:[tuple(r) for r in db.execute('SELECT * FROM '+table)] for table in ['task_drafts','task_creations','assets','image_slots']}
     database.initialize()
     with database.connection() as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0]==12 and not db.execute('PRAGMA foreign_key_check').fetchall()
+        assert db.execute('PRAGMA user_version').fetchone()[0]==13 and not db.execute('PRAGMA foreign_key_check').fetchall()
         for table,rows in before.items():
             actual=[tuple(r) for r in db.execute('SELECT * FROM '+table)]
             if table in {'task_drafts','task_creations'}:actual=[r[:-1] for r in actual]

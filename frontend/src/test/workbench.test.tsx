@@ -94,9 +94,9 @@ describe('F01 frontend with explicit HTTP mocks (not browser or AI acceptance)',
     expect(await screen.findByText(/尚无任务/)).toBeInTheDocument()
   })
 
-  it('keeps unavailable shell controls disabled and other modes unavailable', () => {
+  it('enables Quick-B while keeping Listing unavailable', () => {
     mount('/workspace/new')
-    expect(screen.getByRole('option', { name: /Quick-B/ })).toBeDisabled()
+    expect(screen.getByRole('option', { name: /Quick-B/ })).not.toBeDisabled()
     expect(screen.getByRole('option', { name: /Listing/ })).toBeDisabled()
     expect(screen.getByLabelText('选择商品图片')).toBeInTheDocument()
     expect(screen.getByLabelText('整体运营要求')).not.toBeDisabled()

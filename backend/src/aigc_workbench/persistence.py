@@ -241,7 +241,7 @@ class SQLiteTaskStore:
             connection.execute("PRAGMA foreign_keys = OFF")
             connection.execute("BEGIN IMMEDIATE")
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
+            if version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}:
                 raise RuntimeError(f"Unsupported database schema version: {version}")
             if version == 0:
                 connection.execute(V1_TASKS)
@@ -302,8 +302,23 @@ class SQLiteTaskStore:
                 # 原始创建标题不能随重命名改变，否则原 Operation 的重放会失去幂等性。
                 connection.execute('UPDATE task_creations SET initial_title=(SELECT title FROM task_drafts WHERE task_drafts.id=task_creations.task_id) WHERE initial_title IS NULL')
                 connection.execute('PRAGMA user_version = 12')
+                version = 12
+            if version == 12:
+                self._upgrade_v13(connection)
+                connection.execute('PRAGMA user_version = 13')
             if connection.execute("PRAGMA foreign_key_check").fetchone():
                 raise RuntimeError("Database foreign-key validation failed")
+
+    def _upgrade_v13(self, connection: sqlite3.Connection) -> None:
+        # 仅扩展现有 Task.mode 的 CHECK。保留 UUID、软删除及全部子表关系，失败整笔回滚。
+        definition = V1_TASKS.replace('CREATE TABLE task_drafts (', 'CREATE TABLE task_drafts_next (')
+        definition = definition.replace("mode = 'quick_a'", "mode IN ('quick_a','quick_b')")
+        definition = definition.replace('created_at TEXT NOT NULL', 'created_at TEXT NOT NULL, deleted_at TEXT')
+        connection.execute(definition)
+        fields = 'id,title,mode,status,created_at,deleted_at'
+        connection.execute(f'INSERT INTO task_drafts_next ({fields}) SELECT {fields} FROM task_drafts')
+        connection.execute('DROP TABLE task_drafts')
+        connection.execute('ALTER TABLE task_drafts_next RENAME TO task_drafts')
 
     def _upgrade_v10(self, connection: sqlite3.Connection) -> None:
         # Rebuild only this table's CHECK. UUIDs, positions, references and child FK names stay unchanged.

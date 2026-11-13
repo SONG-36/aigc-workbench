@@ -44,6 +44,9 @@ def compose(context):
     if context['version'] == 'c07-current-slot-selected-base-v1':
         boundaries = boundaries.replace('12V/24V系统兼容与DC3.5V-24V工作范围分开，不为工程车辆追加电压。',
                                        '保留实际来源中的营销数值和图文对应关系，不创造未经提供的参数。')
+    if context['version'] == 'c07-quick-b-selected-base-v1':
+        from .quickb import SUBJECT_RULES, MARKETING_RULES
+        boundaries += SUBJECT_RULES + MARKETING_RULES
     if "output_plan" in context:
         plan = context["output_plan"]
         output = OUTPUT.replace("1024x1536", plan["model_generation_size"])
@@ -67,8 +70,8 @@ class C07Service(C06Service):
             raise C01Error('TEST_REVISION_DISABLED', 'ACCESS', 'TEST_ONLY基础图片不能用于真实运营修改。')
         task = self.service.tasks.get_draft(task_id)
         slot = next((s for s in task.slots if s.id == slot_id), None)
-        if task.mode != "quick_a" or slot is None or slot.output_size not in OUTPUT_SIZES or not slot.reference_asset_id:
-            raise C01Error("REVISION_SLOT_UNSUPPORTED", "SOURCE_SELECTION", "本轮修改需要当前Quick-A图位、有效参考及受支持的输出像素尺寸。")
+        if task.mode not in {"quick_a", "quick_b"} or slot is None or slot.output_size not in OUTPUT_SIZES or not slot.reference_asset_id:
+            raise C01Error("REVISION_SLOT_UNSUPPORTED", "SOURCE_SELECTION", "本轮修改需要当前 Quick-A/Quick-B 图位、有效参考及受支持的输出像素尺寸。")
         product, product_bytes = self.service.tasks.read_asset(task_id, UUID(base["product_asset_id"]))
         reference, reference_bytes = self.service.tasks.read_asset(task_id, slot.reference_asset_id)
         if product.role != AssetRole.PRODUCT_IMAGE or reference.role != AssetRole.MARKETING_REFERENCE:
@@ -79,7 +82,10 @@ class C07Service(C06Service):
         if root["capability"] != "C06" or root["task_id"] != str(task_id) or root["slot_id"] != str(slot_id):
             raise C01Error("REVISION_ROOT_INVALID", "SOURCE_SELECTION", "基础版本缺少对应的原始制作来源。")
         records = root["source_provenance"]
-        direct = root['context'].get('version') == 'quick-a-direct-v1'
+        quick_b = root['context'].get('version') == 'quick-b-direct-v1'
+        if (task.mode == 'quick_b') != quick_b:
+            raise C01Error('REVISION_MODE_MISMATCH', 'SOURCE_SELECTION', '基础版本与当前任务模式不一致。')
+        direct = root['context'].get('version') in {'quick-a-direct-v1', 'quick-b-direct-v1'}
         if direct:
             # 直接生成版本以自身 Snapshot/原图来源追溯，不读取不存在的 C03 交接文件。
             if records != [{'kind': 'ASSET', **item} for item in root['context']['image_inputs']]:
@@ -106,6 +112,8 @@ class C07Service(C06Service):
                 prohibited_changes=original['prohibited_changes'],
                 marketing_relationship_locks=original['C04_MARKETING_CONTENT']['parameter_and_relationship_locks'],
                 initial_AI_content_decisions=original['C04_MARKETING_CONTENT']['claim_decisions'])
+        if quick_b:
+            effective['marketing_source_status'] = 'QUICK_B_OPERATOR_DEFAULT_APPLICABLE / NOT_INDEPENDENTLY_CERTIFIED'
         from .requirements import effective_requirements
         requirements = effective_requirements(task, slot)
         if requirements is not None:
@@ -140,6 +148,9 @@ class C07Service(C06Service):
             context['version'] = 'c07-current-slot-selected-base-v2'
         if root['context'].get('version') == 'quick-a-direct-v1':
             context['version'] = 'c07-direct-selected-base-v1'
+        if root['context'].get('version') == 'quick-b-direct-v1':
+            context['version'] = 'c07-quick-b-selected-base-v1'
+            context['business_source']['mode'] = 'quick_b'
         composition = compose(context)
         snapshot = {"id": str(uuid4()), "created_at": now(), "capability": "C07", "task_id": str(task_id), "slot_id": str(slot_id),
                     "product_asset_id": base["product_asset_id"], "reference_asset_id": sources["image_inputs"][2]["source_asset_id"],

@@ -1,11 +1,10 @@
 import {useEffect,useRef,useState} from 'react'
 import {useNavigate} from 'react-router-dom'
-import {ApiError,configureSlot,createQuickADraft,createSlot,getTask,uploadAsset} from '../api/tasks'
+import {ApiError,configureSlot,createTaskDraft,createSlot,getTask,uploadAsset} from '../api/tasks'
 import type {OutputSize,SlotKind,TaskDraft} from '../types'
 import {operationId} from '../utils/operationId'
 import {newTaskFiles,type CachedFiles} from '../utils/newTaskFiles'
 import {fixedSlot,slotTitle} from '../utils/slotTypes'
-const key='aigc.pending-task-creation'
 type Info=Pick<File,'name'|'size'|'type'|'lastModified'>
 export type DraftSlot={key:string;kind:SlotKind;ordinal:number;active:boolean;size:OutputSize;requirements:string;
  uploadOp:string;slotOp:string;slotId:string|null;referenceId:string|null;fileInfo:Info|null;configVersion?:number}
@@ -14,12 +13,12 @@ type Draft={title:string;overallRequirements:string;operationId:string;productOp
 const info=(f:File|null):Info|null=>f&&({name:f.name,size:f.size,type:f.type,lastModified:f.lastModified})
 function makeSlot(kind:SlotKind,ordinal=1):DraftSlot{return {key:operationId(),kind,ordinal,active:!fixedSlot(kind),size:'1024x1536',requirements:'',
  uploadOp:operationId(),slotOp:operationId(),slotId:null,referenceId:null,fileInfo:null}}
-function restore():Draft {
+function restore(key:string,mode:TaskDraft['mode']):Draft {
  const fresh:Draft={title:'',overallRequirements:'',operationId:operationId(),productOp:operationId(),started:false,
  taskId:null,productId:null,productInfo:null,slots:[makeSlot('main'),makeSlot('dimensions'),makeSlot('comparison')]}
  try {
   const old=JSON.parse(sessionStorage.getItem(key)||'null')
-  if(typeof old?.title==='string'&&typeof old?.operationId==='string') {
+  if(typeof old?.title==='string'&&typeof old?.operationId==='string'&&(old.mode??'quick_a')===mode) {
    if(Array.isArray(old.slots))return {...fresh,...old}
    // Resume the earlier single-slot intent with its original operation identities.
    const slot={...makeSlot(old.kind||'main'),key:old.slotOp||fresh.slots[0].key,active:!!old.started||!!old.fileInfo?.reference,
@@ -30,9 +29,11 @@ function restore():Draft {
  }catch{/* Unreadable intents never auto-submit. */}
  return fresh
 }
-function remember(d:Draft|null){try {d?sessionStorage.setItem(key,JSON.stringify(d)):sessionStorage.removeItem(key)}catch{/* Keep current page state and unload warning. */}}
-export function useNewQuickATask(){
- const [draft,setDraft]=useState(restore),current=useRef(draft)
+export function useNewQuickATask(mode:TaskDraft['mode']='quick_a'){
+ // 保存模式分开暂存；切换新建入口不能把另一模式的待上传文件或 Operation 带入。
+ const key=mode==='quick_a'?'aigc.pending-task-creation':'aigc.pending-quick-b-task-creation'
+ function remember(d:Draft|null){try {d?sessionStorage.setItem(key,JSON.stringify({...d,mode})):sessionStorage.removeItem(key)}catch{/* Keep current page state and unload warning. */}}
+ const [draft,setDraft]=useState(()=>restore(key,mode)),current=useRef(draft)
  const [files,setFiles]=useState<CachedFiles>({product:null,reference:null,references:{}}),selected=useRef(files)
  const [task,setTask]=useState<TaskDraft|null>(null),[busy,setBusy]=useState(false),[hydrating,setHydrating]=useState(true)
  const [stage,setStage]=useState(''),[warning,setWarning]=useState('')
@@ -87,7 +88,8 @@ export function useNewQuickATask(){
    if(!current.current.productId&&!selected.current.product)throw new ApiError('请选择实际商品图片。','rejected')
    if(!current.current.slots.some(s=>s.active&&(s.referenceId||selected.current.references?.[s.key])))throw new ApiError('请在至少一个图位直接上传对应参考。','rejected')
    await queue.current;if(!active.current)return;checkpoint({started:true});progress(current.current.taskId?'恢复已保存任务':'创建任务')
-   let saved=current.current.taskId?await getTask(current.current.taskId):await createQuickADraft(current.current.title,current.current.operationId,current.current.overallRequirements)
+   let saved=current.current.taskId?await getTask(current.current.taskId):await createTaskDraft(current.current.title,current.current.operationId,current.current.overallRequirements,mode)
+   if(saved.mode!==mode)throw new ApiError('已保存任务模式不一致，未继续上传或绑定。','rejected')
    checkpoint({taskId:saved.id});publish(saved);if(!active.current)return
    target='product';progress('保存商品图片')
    if(!current.current.productId){const uploaded=await uploadAsset(saved.id,'product_image',selected.current.product!,current.current.productOp);saved=uploaded

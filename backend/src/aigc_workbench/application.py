@@ -61,7 +61,7 @@ class TaskService:
     def __init__(self, store: TaskStore, files: ImageFiles):
         self.store, self.files = store, files
 
-    def create_draft(self, title: str, operation_id: UUID, overall_requirement: str = "") -> Task:
+    def create_draft(self, title: str, operation_id: UUID, overall_requirement: str = "", mode: str = "quick_a") -> Task:
         title = Task.normalize_title(title)
         OverallRequirement.validate(overall_requirement)
         with self.store.write() as changes:
@@ -69,10 +69,11 @@ class TaskService:
             if previous:
                 if previous.deleted_at is not None:
                     raise Conflict('任务已删除，原创建操作不能重新建立任务。')
-                if changes.creation_title(operation_id) != title or changes.creation_requirement(operation_id) != overall_requirement:
+                if (changes.creation_title(operation_id) != title or changes.creation_requirement(operation_id) != overall_requirement
+                        or previous.mode != mode):
                     raise Conflict("同一创建操作不能用于不同任务内容。")
                 return previous
-            task = Task.create(title)
+            task = Task.create(title, mode)
             changes.add_task(task, operation_id, overall_requirement)
             if overall_requirement:
                 changes.add_requirement(OverallRequirement(uuid4(), task.id, 1, overall_requirement, datetime.now(timezone.utc)), operation_id)
